@@ -99,11 +99,21 @@ try {
         FOREIGN KEY(crawl_id) REFERENCES crawls(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
-    // Indexes for absolute performance
-    $db->exec("CREATE INDEX idx_crawl_queue_status ON crawl_queue(crawl_id, status)");
-    $db->exec("CREATE INDEX idx_pages_crawl_url ON pages(crawl_id, url(255))");
-    $db->exec("CREATE INDEX idx_links_target ON links(crawl_id, target_url(255))");
-    $db->exec("CREATE INDEX idx_issues_severity ON issues(crawl_id, severity)");
+    // Indexes for absolute performance (ignore duplicate key errors if they already exist)
+    $indexes = [
+        "CREATE INDEX idx_crawl_queue_status ON crawl_queue(crawl_id, status)",
+        "CREATE INDEX idx_pages_crawl_url ON pages(crawl_id, url(255))",
+        "CREATE INDEX idx_links_target ON links(crawl_id, target_url(255))",
+        "CREATE INDEX idx_issues_severity ON issues(crawl_id, severity)"
+    ];
+
+    foreach ($indexes as $sql) {
+        try {
+            $db->exec($sql);
+        } catch (PDOException $e) {
+            // Ignore if index already exists (1061 is MySQL's duplicate key error code)
+        }
+    }
 
     echo "Database initialized successfully.\n";
 
