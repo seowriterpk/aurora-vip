@@ -1,0 +1,5 @@
+{
+  "name": "AURORA-X: Client-Side SEO Auditor",
+  "description": "A forensic-grade, browser-based technical SEO auditing tool. Features deep crawling, real-time issue detection, canonical analysis, and AI-powered fix recommendations.",
+  "requestFramePermissions": []
+}

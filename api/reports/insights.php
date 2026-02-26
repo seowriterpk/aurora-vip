@@ -1,0 +1,81 @@
+<?php
+require_once __DIR__ . '/../config.php';
+authenticate();
+
+$crawlId = $_GET['crawl_id'] ?? 0;
+
+if (!$crawlId) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Missing crawl_id']);
+    exit;
+}
+
+try {
+    $db = getDb();
+
+    // 1. Crawl Depth Distribution
+    $stmt = $db->prepare("SELECT depth, COUNT(*) as count FROM pages WHERE crawl_id = ? GROUP BY depth ORDER BY depth ASC");
+    $stmt->execute([$crawlId]);
+    $depthDistribution = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // 2. Orphan Pages (Pages with 0 incoming internal links)
+    // Needs a left join from pages to links on target_url.
+    // If we only crawled starting from a seed, technically we shouldn't find true orphans unless we uploaded an XML sitemap.
+    // However, we can simulate 'Low Importance Pages' (1 incoming link).
+    $stmt = $db->prepare("
+        SELECT p.url, COUNT(l.id) as incoming_links 
+        FROM pages p 
+        LEFT JOIN links l ON p.url = l.target_url AND l.crawl_id = p.crawl_id
+        WHERE p.crawl_id = ?
+        GROUP BY p.url
+        HAVING incoming_links <= 1
+        ORDER BY incoming_links ASC
+        LIMIT 20
+    ");
+    $stmt->execute([$crawlId]);
+    $lowLinkedPages = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // 3. Broken Internal Links (Links pointing to non-200 pages)
+    $stmt = $db->prepare("
+        SELECT l.source_url, l.target_url, p.status_code 
+        FROM links l
+        JOIN pages p ON l.target_url = p.url AND l.crawl_id = p.crawl_id
+        WHERE l.crawl_id = ? AND l.is_external = 0 AND p.status_code != 200
+        LIMIT 20
+    ");
+    $stmt->execute([$crawlId]);
+    $brokenInternalLinks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // 4. Case-Sensitive Slug Mismatches (Links pointing to uppercase URLs but returning 200/canonicalized to lowercase)
+    // Approximated by finding links where target_url has uppercase letters.
+    $stmt = $db->prepare("
+        SELECT source_url, target_url 
+        FROM links 
+        WHERE crawl_id = ? AND is_external = 0 
+        AND target_url GLOB '*[A-Z]*' 
+        LIMIT 10
+    ");
+    // SQLite GLOB is case sensitive. MySQL doesn't have GLOB exactly like this, we use REGEXP binary.
+    $stmt = $db->prepare("
+        SELECT source_url, target_url 
+        FROM links 
+        WHERE crawl_id = ? AND is_external = 0 
+        AND target_url COLLATE utf8mb4_bin REGEXP '[A-Z]'
+        LIMIT 10
+    ");
+    $stmt->execute([$crawlId]);
+    $caseIssues = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+
+    echo json_encode([
+        'depth_distribution' => $depthDistribution,
+        'low_linked_pages' => $lowLinkedPages,
+        'broken_internal_links' => $brokenInternalLinks,
+        'case_issues' => $caseIssues
+    ]);
+
+} catch (PDOException $e) {
+    http_response_code(500);
+    echo json_encode(['error' => 'Database error: ' . $e->getMessage()]);
+}
+?>
