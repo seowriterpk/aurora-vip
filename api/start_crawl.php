@@ -30,9 +30,12 @@ try {
     $stmt->execute([$projectId]);
     $crawlId = $db->lastInsertId();
 
+    require_once __DIR__ . '/engine/parser.php';
+    $normalizedTargetUrl = Parser::normalizeUrl($targetUrl);
+
     // Insert the seed URL into the queue at depth 0
     $stmt = $db->prepare("INSERT INTO crawl_queue (crawl_id, url, depth, status) VALUES (?, ?, 0, 'PENDING')");
-    $stmt->execute([$crawlId, $targetUrl]);
+    $stmt->execute([$crawlId, $normalizedTargetUrl]);
 
     echo json_encode([
         'message' => 'Crawl initiated successfully',
@@ -42,6 +45,6 @@ try {
 
 } catch (PDOException $e) {
     http_response_code(500);
-    echo json_encode(['error' => 'Database error: ' . $e->getMessage()]);
+    echo json_encode(['error' => 'The engine encountered a background database error while attempting to initialize the crawl session.']);
 }
 ?>

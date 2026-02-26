@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Search, ChevronLeft, ChevronRight, AlertCircle, RefreshCw } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, AlertCircle, RefreshCw, Download } from 'lucide-react';
 
-const API_HEADERS = {
-    'Authorization': 'Bearer AURORA_SECRET_2026',
-};
 
 export const Crawler: React.FC = () => {
     const [searchParams] = useSearchParams();
@@ -22,7 +19,7 @@ export const Crawler: React.FC = () => {
         if (!crawlId) return;
         setLoading(true);
         try {
-            const res = await fetch(`/api/get_pages.php?crawl_id=${crawlId}&limit=${limit}&offset=${page * limit}&search=${encodeURIComponent(search)}`, { headers: API_HEADERS });
+            const res = await fetch(`/api/get_pages.php?crawl_id=${crawlId}&limit=${limit}&offset=${page * limit}&search=${encodeURIComponent(search)}`);
             const json = await res.json();
             if (json.data) {
                 setData(json.data);
@@ -42,7 +39,16 @@ export const Crawler: React.FC = () => {
     }, [crawlId, page, search]);
 
     if (!crawlId) {
-        return <div className="p-8 text-center text-slate-500 border border-slate-800 border-dashed rounded-xl">No Crawl ID Selected. Go back to the Dashboard.</div>;
+        return (
+            <div className="flex flex-col items-center justify-center mt-20 space-y-4">
+                <div className="p-8 text-center text-slate-400 max-w-md bg-slate-900 border border-slate-800 rounded-xl shadow-lg">
+                    <AlertCircle className="w-12 h-12 text-indigo-400 mx-auto mb-4" />
+                    <h3 className="text-lg font-bold text-white mb-2">Select a Project First</h3>
+                    <p className="text-sm mb-6 text-slate-500">To view crawler data, you must select a project from the main dashboard.</p>
+                    <a href="/" className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg font-medium transition-colors inline-block">Return to Dashboard</a>
+                </div>
+            </div>
+        );
     }
 
     const totalPages = Math.ceil(total / limit);
@@ -50,8 +56,12 @@ export const Crawler: React.FC = () => {
     return (
         <div className="flex flex-col h-full space-y-4">
             <div className="flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-4">
-                    <h2 className="text-lg font-bold text-white flex items-center gap-2">Deep Technical Crawler <span className="text-xs bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded ml-2">Screaming Frog Engine</span></h2>
+                <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2 mb-1">
+                        <a href="/" className="text-xs text-slate-500 hover:text-indigo-400 flex items-center gap-1 transition-colors"><ChevronLeft className="w-3 h-3" /> Dashboard</a>
+                    </div>
+                    <h2 className="text-lg font-bold text-white flex items-center gap-2">Every URL Discovered</h2>
+                    <p className="text-sm text-slate-400">This table lists all HTML pages the engine found. Review status codes, internal headings, and response times to ensure quality.</p>
                 </div>
 
                 <div className="flex items-center gap-4">
@@ -66,6 +76,14 @@ export const Crawler: React.FC = () => {
                         />
                     </div>
                     <button onClick={loadData} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-md text-slate-400 hover:text-white transition-colors"><RefreshCw className="w-4 h-4" /></button>
+
+                    <a
+                        href={`/api/export.php?crawl_id=${crawlId}&type=pages&token=AURORA_SECRET_2026`}
+                        download
+                        className="p-2 bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-500/30 rounded-md text-emerald-400 transition-colors flex items-center gap-2 text-sm font-medium"
+                    >
+                        <Download className="w-4 h-4" /> Export CSV
+                    </a>
                 </div>
             </div>
 
@@ -80,6 +98,7 @@ export const Crawler: React.FC = () => {
                                 <th className="px-4 py-3">Title 1</th>
                                 <th className="px-4 py-3">H1 1</th>
                                 <th className="px-4 py-3">Meta Description 1</th>
+                                <th className="px-4 py-3">JSON-LD Schema</th>
                                 <th className="px-4 py-3 text-center">Word Count</th>
                                 <th className="px-4 py-3 text-center">Text Ratio</th>
                                 <th className="px-4 py-3 text-center">Response Time</th>
@@ -105,6 +124,7 @@ export const Crawler: React.FC = () => {
                                         <td className="px-4 py-2 max-w-[200px] truncate text-slate-400" title={row.title}>{row.title || '-'}</td>
                                         <td className="px-4 py-2 max-w-[200px] truncate text-slate-400" title={row.h1}>{row.h1 || '-'}</td>
                                         <td className="px-4 py-2 max-w-[200px] truncate text-slate-400" title={row.meta_desc}>{row.meta_desc || '-'}</td>
+                                        <td className="px-4 py-2 text-xs text-indigo-400 max-w-[150px] truncate" title={row.schema_types}>{row.schema_types || 'N/A'}</td>
                                         <td className="px-4 py-2 text-center text-slate-400">{row.word_count}</td>
                                         <td className="px-4 py-2 text-center text-slate-400">{row.text_ratio_percent}%</td>
                                         <td className="px-4 py-2 text-center text-slate-400 font-mono">{row.load_time_ms}ms</td>

@@ -3,6 +3,63 @@ require_once __DIR__ . '/../config.php';
 
 class Parser
 {
+    // Basic Simhash implementation for 64-bit fuzzy text matching
+    public static function simhash($text)
+    {
+        $tokens = str_word_count(strtolower($text), 1);
+        $v = array_fill(0, 64, 0);
+
+        foreach ($tokens as $token) {
+            // Get 64-bit hash of token
+            $hash = hexdec(substr(md5($token), 0, 16));
+            for ($i = 0; $i < 64; $i++) {
+                $bit = ($hash >> $i) & 1;
+                $v[$i] += ($bit ? 1 : -1);
+            }
+        }
+
+        $fingerprint = 0;
+        for ($i = 0; $i < 64; $i++) {
+            if ($v[$i] > 0) {
+                // Set the i-th bit to 1
+                $fingerprint |= (1 << $i);
+            }
+        }
+        return (string) $fingerprint; // Return as string for DB safety
+    }
+
+    // Ensure URLs are stripped of fragments, have consistent trailing slashes, and lowercase domains
+    public static function normalizeUrl($url)
+    {
+        // 1. Strip fragments (#anchor)
+        $url = preg_replace('/#.*$/', '', $url);
+
+        // 2. Parse the URL
+        $parsed = parse_url($url);
+        if (!$parsed)
+            return $url;
+
+        $scheme = isset($parsed['scheme']) ? strtolower($parsed['scheme']) : 'http';
+        $host = isset($parsed['host']) ? strtolower($parsed['host']) : ''; // Lowercase domain
+        if (!$host)
+            return $url;
+
+        $port = isset($parsed['port']) ? ':' . $parsed['port'] : '';
+        $path = $parsed['path'] ?? '/';
+
+        // 3. Trailing slash consistency: force trailing slash on root, remove it on files
+        if ($path === '' || $path === '/') {
+            $path = '/';
+        } else {
+            // Remove trailing slash if it's not the root path
+            $path = rtrim($path, '/');
+        }
+
+        $query = isset($parsed['query']) ? '?' . $parsed['query'] : '';
+
+        return "$scheme://$host$port$path$query";
+    }
+
     // Standardizes URLs relative to base
     public static function absoluteUrl($href, $base)
     {
@@ -52,6 +109,8 @@ class Parser
         $canonical = '';
 
         foreach ($doc->getElementsByTagName('meta') as $meta) {
+            if (!($meta instanceof DOMElement))
+                continue;
             $name = strtolower($meta->getAttribute('name'));
             if ($name === 'description')
                 $metaDesc = trim($meta->getAttribute('content'));
@@ -60,6 +119,8 @@ class Parser
         }
 
         foreach ($doc->getElementsByTagName('link') as $link) {
+            if (!($link instanceof DOMElement))
+                continue;
             if (strtolower($link->getAttribute('rel')) === 'canonical') {
                 $canonical = trim($link->getAttribute('href'));
             }
@@ -90,15 +151,43 @@ class Parser
         $totalSizeBytes = strlen($html);
         $textRatio = $totalSizeBytes > 0 ? round(($textSizeBytes / $totalSizeBytes) * 100) : 0;
 
-        // Simple MD5 hash for spotting exact content duplicates
-        $contentHash = md5($cleanText);
+        // Use custom Simhash for fuzzy duplicate detection (replaces fragile MD5)
+        $contentHash = self::simhash($cleanText);
 
-        // --- 4. Links Construction ---
+        // --- 4. Schema.org (JSON-LD) Extraction ---
+        $schemas = [];
+        foreach ($doc->getElementsByTagName('script') as $script) {
+            if (!($script instanceof DOMElement))
+                continue;
+            if (strtolower($script->getAttribute('type')) === 'application/ld+json') {
+                $jsonText = trim($script->textContent);
+                if ($jsonText) {
+                    $decoded = @json_decode($jsonText, true);
+                    if (is_array($decoded)) {
+                        // Extract just the @type to keep DB lightweight
+                        if (isset($decoded['@type'])) {
+                            $schemas[] = is_array($decoded['@type']) ? implode(',', $decoded['@type']) : $decoded['@type'];
+                        } elseif (isset($decoded['@graph']) && is_array($decoded['@graph'])) {
+                            foreach ($decoded['@graph'] as $graphItem) {
+                                if (isset($graphItem['@type'])) {
+                                    $schemas[] = is_array($graphItem['@type']) ? implode(',', $graphItem['@type']) : $graphItem['@type'];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        $schemaTypesRaw = implode(', ', array_unique($schemas));
+
+        // --- 5. Links Construction ---
         $internalLinks = [];
         $externalLinks = [];
         $baseHost = parse_url($url, PHP_URL_HOST);
 
         foreach ($doc->getElementsByTagName('a') as $a) {
+            if (!($a instanceof DOMElement))
+                continue;
             $href = trim($a->getAttribute('href'));
             if (empty($href) || preg_match('/^(javascript|mailto|tel|#):/i', $href))
                 continue;
@@ -112,7 +201,10 @@ class Parser
                 // check if image is anchor
                 $imgs = $a->getElementsByTagName('img');
                 if ($imgs->length > 0) {
-                    $anchor = trim($imgs->item(0)->getAttribute('alt')) ?: 'Empty/Image';
+                    $img = $imgs->item(0);
+                    $anchor = ($img instanceof DOMElement) ? trim($img->getAttribute('alt')) : 'Empty/Image';
+                    if (!$anchor)
+                        $anchor = 'Empty/Image';
                 }
             }
 
@@ -123,8 +215,11 @@ class Parser
                 $snippet = preg_replace('/^(<a[^>]*>).*$/is', '$1...</a>', $snippet);
             }
 
+            // Normalize before saving to prevent infinite loop duplicate traps
+            $finalUrl = self::normalizeUrl($absUrl);
+
             $linkData = [
-                'url' => preg_replace('/#.*$/', '', $absUrl), // strip fragments
+                'url' => $finalUrl,
                 'anchor' => $anchor,
                 'snippet' => $snippet,
             ];
@@ -152,6 +247,7 @@ class Parser
             'word_count' => $wordCount,
             'text_ratio_percent' => $textRatio,
             'content_hash' => $contentHash,
+            'schema_types' => $schemaTypesRaw,
             'is_indexable' => $isIndexable,
             'internal_links' => $internalLinks,
             'external_links' => $externalLinks

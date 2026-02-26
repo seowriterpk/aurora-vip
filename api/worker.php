@@ -11,6 +11,8 @@ $startTime = microtime(true);
 $maxExecutionTime = 40; // Aim to finish within 40 seconds
 $batchSize = 10; // Number of URLs to process concurrently per heartbeat
 
+require_once __DIR__ . '/engine/robots.php';
+
 // CRITICAL: Ensure session is unlocked so frontend UI polling doesn't freeze
 if (session_status() === PHP_SESSION_ACTIVE) {
     session_write_close();
@@ -58,14 +60,37 @@ try {
         exit;
     }
 
+    $domain = parse_url($queueItems[0]['url'], PHP_URL_HOST);
+
+    // Initialize and Fetch Robots.txt rules for this domain
+    $robotsLoader = new RobotsTxtParser($domain);
+    $robotsLoader->fetchAndParse();
+
     $urlsToFetch = [];
     $urlMap = []; // map URL to depth and queue id
     $queueIdsStr = [];
 
     foreach ($queueItems as $item) {
+        $parsedUrl = parse_url($item['url']);
+        $pathArgs = ($parsedUrl['path'] ?? '/') . (isset($parsedUrl['query']) ? '?' . $parsedUrl['query'] : '');
+
+        // Skip fetching if blocked by robots.txt
+        if (!$robotsLoader->isAllowed($pathArgs)) {
+            $updateQueueStmt = $db->prepare("UPDATE crawl_queue SET status = 'SKIPPED_ROBOTS' WHERE id = ?");
+            $updateQueueStmt->execute([$item['id']]);
+            $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'INFO', ?)")->execute([$crawlId, "Robots.txt Blocked: " . $item['url']]);
+            continue;
+        }
+
         $urlsToFetch[] = $item['url'];
         $urlMap[$item['url']] = $item;
         $queueIdsStr[] = $item['id'];
+    }
+
+    if (empty($urlsToFetch)) {
+        // Everything was blocked in this batch
+        echo json_encode(['message' => 'Batch skipped due to robots.txt']);
+        exit;
     }
 
     // Lock rows
@@ -83,8 +108,8 @@ try {
     $db->beginTransaction();
 
     $insertPageStmt = $db->prepare("INSERT IGNORE INTO pages 
-        (crawl_id, url, status_code, load_time_ms, size_bytes, word_count, text_ratio_percent, content_hash, title, meta_desc, h1, h2_json, canonical, meta_robots, is_indexable, depth, redirect_chain_json) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        (crawl_id, url, status_code, load_time_ms, size_bytes, word_count, text_ratio_percent, content_hash, title, meta_desc, h1, h2_json, canonical, meta_robots, schema_types, is_indexable, depth, redirect_chain_json) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
     $insertLinkStmt = $db->prepare("INSERT INTO links (crawl_id, source_url, target_url, anchor_text, html_snippet, is_external) VALUES (?, ?, ?, ?, ?, ?)");
 
@@ -110,7 +135,15 @@ try {
             continue;
         }
 
-        $parseData = ['word_count' => 0, 'text_ratio_percent' => 0, 'content_hash' => '', 'title' => null, 'meta_desc' => null, 'h1' => null, 'h2_json' => '[]', 'canonical' => null, 'meta_robots' => null, 'is_indexable' => 1, 'internal_links' => [], 'external_links' => []];
+        $parseData = ['word_count' => 0, 'text_ratio_percent' => 0, 'content_hash' => '', 'title' => null, 'meta_desc' => null, 'h1' => null, 'h2_json' => '[]', 'canonical' => null, 'meta_robots' => null, 'schema_types' => null, 'is_indexable' => 1, 'internal_links' => [], 'external_links' => []];
+
+        // Check X-Robots-Tag HTTP Header
+        $isIndexable = 1;
+        if (!empty($result['headers']) && strpos(strtolower($result['headers']), 'x-robots-tag: noindex') !== false) {
+            $isIndexable = 0;
+            $parseData['is_indexable'] = 0;
+            $parseData['meta_robots'] = 'noindex (HTTP header)';
+        }
 
         // Parse if it's HTML
         $contentType = $info['content_type'] ?? '';
@@ -120,10 +153,12 @@ try {
                 $parseData = $tmp;
         }
 
-        // Insert Page
+        // Insert Page - Ensure URL is normalized!
+        $normalizedUrl = Parser::normalizeUrl($url);
+
         $insertPageStmt->execute([
             $crawlId,
-            $url,
+            $normalizedUrl,
             $statusCode,
             $timeMs,
             $sizeBytes,
@@ -136,6 +171,7 @@ try {
             $parseData['h2_json'],
             $parseData['canonical'],
             $parseData['meta_robots'],
+            $parseData['schema_types'] ?? null,
             $parseData['is_indexable'],
             $qItem['depth'],
             json_encode($chain)
@@ -143,15 +179,16 @@ try {
 
         // Insert Links & update queue
         foreach ($parseData['internal_links'] as $link) {
-            $insertLinkStmt->execute([$crawlId, $url, $link['url'], $link['anchor'], $link['snippet'], 0]);
+            $normalizedInternal = Parser::normalizeUrl($link['url']);
+            $insertLinkStmt->execute([$crawlId, $normalizedUrl, $normalizedInternal, $link['anchor'], $link['snippet'], 0]);
 
             // Limit depth to prevent infinite loops (setting hard cap to 20 for safety)
             if ($qItem['depth'] < 20) {
-                $insertQueueStmt->execute([$crawlId, $link['url'], $qItem['depth'] + 1]);
+                $insertQueueStmt->execute([$crawlId, $normalizedInternal, $qItem['depth'] + 1]);
             }
         }
         foreach ($parseData['external_links'] as $link) {
-            $insertLinkStmt->execute([$crawlId, $url, $link['url'], $link['anchor'], $link['snippet'], 1]);
+            $insertLinkStmt->execute([$crawlId, $normalizedUrl, $link['url'], $link['anchor'], $link['snippet'], 1]);
         }
 
         $updateQueueSuccessStmt->execute([$qItem['id']]);

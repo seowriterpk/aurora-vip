@@ -18,19 +18,14 @@ try {
     $stmt->execute([$crawlId]);
     $depthDistribution = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // 2. Orphan Pages (Pages with 0 incoming internal links)
-    // Needs a left join from pages to links on target_url.
-    // If we only crawled starting from a seed, technically we shouldn't find true orphans unless we uploaded an XML sitemap.
-    // However, we can simulate 'Low Importance Pages' (1 incoming link).
+    // 2. True Orphan Pages (Cross-referenced from XML Sitemap)
+    // We now fetch these directly from the `issues` table populated by `sitemap_parser.php`
     $stmt = $db->prepare("
-        SELECT p.url, COUNT(l.id) as incoming_links 
-        FROM pages p 
-        LEFT JOIN links l ON p.url = l.target_url AND l.crawl_id = p.crawl_id
-        WHERE p.crawl_id = ?
-        GROUP BY p.url
-        HAVING incoming_links <= 1
-        ORDER BY incoming_links ASC
-        LIMIT 20
+        SELECT url 
+        FROM issues 
+        WHERE crawl_id = ? AND issue_type = 'orphan_page'
+        ORDER BY id DESC
+        LIMIT 50
     ");
     $stmt->execute([$crawlId]);
     $lowLinkedPages = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -76,6 +71,6 @@ try {
 
 } catch (PDOException $e) {
     http_response_code(500);
-    echo json_encode(['error' => 'Database error: ' . $e->getMessage()]);
+    echo json_encode(['error' => 'The engine encountered a background database error while crunching site architecture insights.']);
 }
 ?>

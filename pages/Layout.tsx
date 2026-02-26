@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, Link, useLocation, useSearchParams } from 'react-router-dom';
-import { Layers, Activity, Search, LayoutDashboard, DatabaseZap } from 'lucide-react';
+import { Layers, Activity, Search, LayoutDashboard, DatabaseZap, LogOut } from 'lucide-react';
 
 export const Layout: React.FC = () => {
     const location = useLocation();
@@ -42,6 +42,20 @@ export const Layout: React.FC = () => {
                         );
                     })}
                 </nav>
+
+                <div className="p-4 border-t border-slate-800">
+                    <button
+                        onClick={() => {
+                            fetch('/api/logout.php').finally(() => {
+                                window.location.href = '/';
+                            });
+                        }}
+                        className="flex items-center gap-3 w-full px-3 py-2.5 rounded-md text-sm transition-colors text-slate-400 hover:bg-red-500/10 hover:text-red-400"
+                    >
+                        <LogOut className="w-4 h-4" />
+                        Log Out Security Session
+                    </button>
+                </div>
             </aside>
 
             {/* Main Content Area */}

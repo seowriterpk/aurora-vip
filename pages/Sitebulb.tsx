@@ -3,9 +3,6 @@ import { useSearchParams } from 'react-router-dom';
 import { Network, Link as LinkIcon, AlertTriangle, Layers } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
-const API_HEADERS = {
-    'Authorization': 'Bearer AURORA_SECRET_2026',
-};
 
 export const Sitebulb: React.FC = () => {
     const [searchParams] = useSearchParams();
@@ -17,7 +14,7 @@ export const Sitebulb: React.FC = () => {
     useEffect(() => {
         if (!crawlId) return;
         setLoading(true);
-        fetch(`/api/reports/insights.php?crawl_id=${crawlId}`, { headers: API_HEADERS })
+        fetch(`/api/reports/insights.php?crawl_id=${crawlId}`)
             .then(res => res.json())
             .then(json => {
                 if (!json.error) setData(json);
@@ -26,7 +23,18 @@ export const Sitebulb: React.FC = () => {
             .finally(() => setLoading(false));
     }, [crawlId]);
 
-    if (!crawlId) return <div className="p-8 text-center text-slate-500 border border-slate-800 border-dashed rounded-xl">No Crawl ID Selected. Go back to Dashboard.</div>;
+    if (!crawlId) {
+        return (
+            <div className="flex flex-col items-center justify-center mt-20 space-y-4">
+                <div className="p-8 text-center text-slate-400 max-w-md bg-slate-900 border border-slate-800 rounded-xl shadow-lg">
+                    <AlertTriangle className="w-12 h-12 text-indigo-400 mx-auto mb-4" />
+                    <h3 className="text-lg font-bold text-white mb-2">Select a Project First</h3>
+                    <p className="text-sm mb-6 text-slate-500">To view Sitebulb insights, you must select an active project from the main dashboard.</p>
+                    <a href="/" className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg font-medium transition-colors inline-block">Return to Dashboard</a>
+                </div>
+            </div>
+        );
+    }
     if (loading) return <div className="p-8 text-center text-slate-500">Processing graph analysis...</div>;
     if (!data) return <div className="p-8 text-center text-red-500">Failed to load insight data.</div>;
 
@@ -37,10 +45,18 @@ export const Sitebulb: React.FC = () => {
 
     return (
         <div className="max-w-6xl mx-auto space-y-8">
-            <div className="flex items-center gap-3 mb-6">
-                <Network className="w-6 h-6 text-indigo-400" />
-                <h2 className="text-2xl font-bold text-white">Site Architecture Insights</h2>
+            <div className="flex items-center justify-between mb-2">
+                <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2 mb-1">
+                        <a href="/" className="text-xs text-slate-500 hover:text-indigo-400 flex items-center gap-1 transition-colors">Dashboard</a>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <Network className="w-6 h-6 text-indigo-400" />
+                        <h2 className="text-2xl font-bold text-white">Site Architecture Insights</h2>
+                    </div>
+                </div>
             </div>
+            <p className="text-sm text-slate-400 mb-6">This tool analyzes the structure of your website, showing how deep pages are buried, finding broken internal links, and identifying upper-case URL issues.</p>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Depth Distribution */}

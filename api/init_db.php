@@ -52,6 +52,7 @@ try {
         h2_json TEXT,
         canonical TEXT,
         meta_robots TEXT,
+        schema_types TEXT,
         is_indexable TINYINT(1) DEFAULT 1,
         depth INT,
         redirect_chain_json TEXT,

@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Loader2, DatabaseZap, Globe, ChevronRight, Pause, Square, Trash2, Terminal } from 'lucide-react';
+import { Play, Loader2, DatabaseZap, Globe, ChevronRight, Pause, Square, Trash2, Terminal, Download, Map } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
 const API_HEADERS = {
-    'Authorization': 'Bearer AURORA_SECRET_2026',
     'Content-Type': 'application/json'
 };
 
@@ -118,6 +117,9 @@ export const Dashboard: React.FC = () => {
     };
 
     const handleAction = async (crawlId: number, action: string) => {
+        if (action === 'DELETE' && !window.confirm("Are you sure you want to permanently delete this project and all of its data? This cannot be undone.")) return;
+        if (action === 'STOP' && !window.confirm("Are you sure you want to stop this active crawl?")) return;
+
         try {
             await fetch('/api/manage_crawl.php', {
                 method: 'POST',
@@ -148,6 +150,20 @@ export const Dashboard: React.FC = () => {
             console.error(e);
         }
     }
+
+    const analyzeSitemap = async (crawlId: number) => {
+        try {
+            const res = await fetch(`/api/reports/sitemap_parser.php?crawl_id=${crawlId}`, { headers: API_HEADERS });
+            const data = await res.json();
+            if (data.error) {
+                alert(data.error);
+            } else {
+                alert(`${data.message}\nFound: ${data.sitemap_urls_found} URLs\nOrphans Inserted: ${data.orphans_found}`);
+            }
+        } catch (e) {
+            alert('Failed to analyze sitemap.');
+        }
+    };
 
     return (
         <div className="max-w-6xl mx-auto space-y-8 pb-10">
@@ -220,7 +236,7 @@ export const Dashboard: React.FC = () => {
                                     <th className="px-6 py-4 font-medium">Domain</th>
                                     <th className="px-6 py-4 font-medium">Status</th>
                                     <th className="px-6 py-4 font-medium text-center">URLs Parsed</th>
-                                    <th className="px-6 py-4 font-medium text-right">Controls</th>
+                                    <th className="px-6 py-4 font-medium text-right">Controls & Export</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800">
@@ -254,10 +270,19 @@ export const Dashboard: React.FC = () => {
                                                     </button>
                                                 )}
 
-                                                {/* Global delete button */}
                                                 {p.latest_crawl_id && (
-                                                    <button onClick={() => { if (confirm('Delete entire project and clear memory?')) handleAction(p.latest_crawl_id, 'DELETE') }} className="p-1.5 text-red-500 hover:bg-red-500/10 rounded ml-2" title="Delete Project">
-                                                        <Trash2 className="w-4 h-4" />
+                                                    <a href={`/api/export.php?crawl_id=${p.latest_crawl_id}&type=pages`} download className="p-1.5 text-emerald-500 hover:bg-emerald-500/10 rounded ml-2" title="Export CSV Pages">
+                                                        <Download className="w-4 h-4" />
+                                                    </a>
+                                                )}
+
+                                                <button onClick={() => handleAction(p.latest_crawl_id, 'DELETE')} className="p-1.5 text-red-500 hover:bg-red-500/10 rounded ml-2" title="Permanently Delete Project">
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+
+                                                {p.latest_crawl_id && p.status === 'COMPLETED' && (
+                                                    <button onClick={() => analyzeSitemap(p.latest_crawl_id)} className="p-1.5 text-blue-400 hover:bg-blue-500/10 rounded" title="Analyze XML Sitemap for Orphans">
+                                                        <Map className="w-4 h-4" />
                                                     </button>
                                                 )}
 
