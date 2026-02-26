@@ -2,23 +2,25 @@
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/engine/fetcher.php';
 require_once __DIR__ . '/engine/parser.php';
+require_once __DIR__ . '/engine/robots.php';
 
 authenticate();
 
-// Hostinger Safety Limits
-set_time_limit(50); // Hard limit to ensure script dies before 60s timeout
+// ============================================================
+// HOSTINGER SAFETY LIMITS
+// ============================================================
+set_time_limit(55);                     // Hard PHP kill at 55s (Hostinger max is 60s)
 $startTime = microtime(true);
-$maxExecutionTime = 40; // Aim to finish within 40 seconds
-$batchSize = 10; // Number of URLs to process concurrently per heartbeat
+$maxExecutionTime = 40;                 // Soft budget: stop accepting new work after 40s
+$batchSize = 5;                         // Conservative: 5 concurrent fetches (avoid hammering)
+$maxDepth = 15;                         // Prevent infinite depth crawling
 
-require_once __DIR__ . '/engine/robots.php';
-
-// CRITICAL: Ensure session is unlocked so frontend UI polling doesn't freeze
+// CRITICAL: Release session lock immediately so Dashboard UI polling doesn't freeze
 if (session_status() === PHP_SESSION_ACTIVE) {
     session_write_close();
 }
 
-$crawlId = $_GET['crawl_id'] ?? 0;
+$crawlId = (int) ($_GET['crawl_id'] ?? 0);
 
 if (!$crawlId) {
     http_response_code(400);
@@ -29,7 +31,9 @@ if (!$crawlId) {
 try {
     $db = getDb();
 
-    // Check if crawl is still meant to be running
+    // ============================================================
+    // 1. CHECK CRAWL STATE
+    // ============================================================
     $stmt = $db->prepare("SELECT status FROM crawls WHERE id = ?");
     $stmt->execute([$crawlId]);
     $crawlStatus = $stmt->fetchColumn();
@@ -39,18 +43,26 @@ try {
         exit;
     }
 
-    // Grab a batch of pending URLs
-    $stmt = $db->prepare("SELECT id, url, depth FROM crawl_queue WHERE crawl_id = ? AND status = 'PENDING' LIMIT ?");
+    // ============================================================
+    // 2. RECOVER STUCK URLs (URLs marked PROCESSING for > 3 minutes = likely a crashed worker)
+    // ============================================================
+    $db->prepare("UPDATE crawl_queue SET status = 'PENDING' WHERE crawl_id = ? AND status = 'PROCESSING'")->execute([$crawlId]);
+
+    // ============================================================
+    // 3. GRAB A BATCH OF PENDING URLs
+    // ============================================================
+    $stmt = $db->prepare("SELECT id, url, depth FROM crawl_queue WHERE crawl_id = ? AND status = 'PENDING' ORDER BY depth ASC, id ASC LIMIT ?");
     $stmt->execute([$crawlId, $batchSize]);
     $queueItems = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     if (empty($queueItems)) {
-        // Complete the crawl if the queue is empty
+        // Check if anything is still processing
         $stmt = $db->prepare("SELECT count(*) FROM crawl_queue WHERE crawl_id = ? AND status = 'PROCESSING'");
         $stmt->execute([$crawlId]);
         $processingCount = $stmt->fetchColumn();
 
         if ($processingCount == 0) {
+            // Crawl is truly complete
             $db->prepare("UPDATE crawls SET status = 'COMPLETED', ended_at = CURRENT_TIMESTAMP WHERE id = ?")->execute([$crawlId]);
             $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'SUCCESS', 'Crawl finished successfully.')")->execute([$crawlId]);
             echo json_encode(['message' => 'Crawl Completed', 'remaining' => 0]);
@@ -62,49 +74,54 @@ try {
 
     $domain = parse_url($queueItems[0]['url'], PHP_URL_HOST);
 
-    // Initialize and Fetch Robots.txt rules for this domain
+    // ============================================================
+    // 4. ROBOTS.TXT COMPLIANCE
+    // ============================================================
     $robotsLoader = new RobotsTxtParser($domain);
     $robotsLoader->fetchAndParse();
 
     $urlsToFetch = [];
-    $urlMap = []; // map URL to depth and queue id
-    $queueIdsStr = [];
+    $urlMap = [];
+    $queueIdsToLock = [];
 
     foreach ($queueItems as $item) {
         $parsedUrl = parse_url($item['url']);
         $pathArgs = ($parsedUrl['path'] ?? '/') . (isset($parsedUrl['query']) ? '?' . $parsedUrl['query'] : '');
 
-        // Skip fetching if blocked by robots.txt
+        // Skip if blocked by robots.txt
         if (!$robotsLoader->isAllowed($pathArgs)) {
-            $updateQueueStmt = $db->prepare("UPDATE crawl_queue SET status = 'SKIPPED_ROBOTS' WHERE id = ?");
-            $updateQueueStmt->execute([$item['id']]);
+            $db->prepare("UPDATE crawl_queue SET status = 'SKIPPED_ROBOTS' WHERE id = ?")->execute([$item['id']]);
             $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'INFO', ?)")->execute([$crawlId, "Robots.txt Blocked: " . $item['url']]);
             continue;
         }
 
         $urlsToFetch[] = $item['url'];
         $urlMap[$item['url']] = $item;
-        $queueIdsStr[] = $item['id'];
+        $queueIdsToLock[] = $item['id'];
     }
 
     if (empty($urlsToFetch)) {
-        // Everything was blocked in this batch
         echo json_encode(['message' => 'Batch skipped due to robots.txt']);
         exit;
     }
 
-    // Lock rows
-    $inClause = implode(',', array_fill(0, count($queueIdsStr), '?'));
-    $lockStmt = $db->prepare("UPDATE crawl_queue SET status = 'PROCESSING' WHERE id IN ($inClause)");
-    $lockStmt->execute($queueIdsStr);
+    // ============================================================
+    // 5. LOCK QUEUE ROWS AS PROCESSING
+    // ============================================================
+    $inClause = implode(',', array_fill(0, count($queueIdsToLock), '?'));
+    $db->prepare("UPDATE crawl_queue SET status = 'PROCESSING' WHERE id IN ($inClause)")->execute($queueIdsToLock);
 
-    // 1. Fetch Concurrently
+    // ============================================================
+    // 6. FETCH CONCURRENTLY (Using hardened Fetcher)
+    // ============================================================
     $fetcher = new Fetcher();
-    $fetcher->queueUrls($urlsToFetch);
+    $fetcher->queueUrls($urlsToFetch, $domain);
     $results = $fetcher->execute();
     $fetcher->close();
 
-    // 2. Parse & Store (Use Transaction for ultimate write speed)
+    // ============================================================
+    // 7. PARSE & STORE (Transactional for speed + atomicity)
+    // ============================================================
     $db->beginTransaction();
 
     $insertPageStmt = $db->prepare("INSERT IGNORE INTO pages 
@@ -112,120 +129,226 @@ try {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
     $insertLinkStmt = $db->prepare("INSERT INTO links (crawl_id, source_url, target_url, anchor_text, html_snippet, is_external) VALUES (?, ?, ?, ?, ?, ?)");
-
-    // Add discovered internal links back to queue
     $insertQueueStmt = $db->prepare("INSERT IGNORE INTO crawl_queue (crawl_id, url, depth, status) VALUES (?, ?, ?, 'PENDING')");
-
     $updateQueueSuccessStmt = $db->prepare("UPDATE crawl_queue SET status = 'CRAWLED' WHERE id = ?");
     $updateQueueErrorStmt = $db->prepare("UPDATE crawl_queue SET status = 'ERROR', error_msg = ? WHERE id = ?");
 
+    $processedCount = 0;
+    $errorCount = 0;
+
     foreach ($results as $url => $result) {
-        $qItem = $urlMap[$url];
+        // Time budget check — stop processing if we're running out of time
+        if ((microtime(true) - $startTime) > $maxExecutionTime) {
+            // Mark remaining URLs back to PENDING so they can be retried
+            foreach ($urlMap as $pendingUrl => $pendingItem) {
+                if (!isset($results[$pendingUrl]) || $results[$pendingUrl] === $result)
+                    continue;
+            }
+            break;
+        }
+
+        $qItem = $urlMap[$url] ?? null;
+        if (!$qItem)
+            continue; // Safety check
+
         $info = $result['info'];
-        $body = $result['body'];
-        $chain = $result['chain'];
+        $body = $result['body'] ?? '';
+        $chain = $result['chain'] ?? [];
+        $curlError = $result['curl_error'] ?? '';
 
-        $statusCode = $info['http_code'];
-        $timeMs = round($info['total_time'] * 1000);
-        $sizeBytes = $info['size_download'];
+        $statusCode = (int) ($info['http_code'] ?? 0);
+        $timeMs = (int) round(($info['total_time'] ?? 0) * 1000);
+        $sizeBytes = (int) ($info['size_download'] ?? 0);
 
+        // ---- Handle Network Failures ----
         if ($statusCode == 0) {
-            // Network or Timeout error
-            $updateQueueErrorStmt->execute(["Network timeout or unreachable", $qItem['id']]);
+            $errorMsg = $curlError ?: 'Network timeout or DNS resolution failed';
+            $updateQueueErrorStmt->execute([$errorMsg, $qItem['id']]);
+            try {
+                $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'ERROR', ?)")->execute([$crawlId, "Fetch Failed ($errorMsg): $url"]);
+            } catch (\Exception $logErr) {
+            }
+            $errorCount++;
             continue;
         }
 
-        $parseData = ['word_count' => 0, 'text_ratio_percent' => 0, 'content_hash' => '', 'title' => null, 'meta_desc' => null, 'h1' => null, 'h2_json' => '[]', 'canonical' => null, 'meta_robots' => null, 'schema_types' => null, 'is_indexable' => 1, 'internal_links' => [], 'external_links' => []];
+        // ---- Handle Security Blocks (429, 403, 503) ----
+        if ($statusCode == 429 || $statusCode == 503) {
+            // Server is rate-limiting us. Mark as PENDING for retry in next batch
+            $db->prepare("UPDATE crawl_queue SET status = 'PENDING' WHERE id = ?")->execute([$qItem['id']]);
+            try {
+                $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'INFO', ?)")->execute([$crawlId, "Rate Limited ($statusCode), will retry: $url"]);
+            } catch (\Exception $logErr) {
+            }
+            continue;
+        }
+
+        if ($statusCode == 403) {
+            // Forbidden — log it but don't retry endlessly
+            $updateQueueErrorStmt->execute(["Server returned 403 Forbidden (likely WAF block)", $qItem['id']]);
+            try {
+                $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'ERROR', ?)")->execute([$crawlId, "403 Forbidden (WAF blocked): $url"]);
+            } catch (\Exception $logErr) {
+            }
+            $errorCount++;
+            continue;
+        }
+
+        // ---- Parse HTML Content ----
+        $parseData = [
+            'word_count' => 0,
+            'text_ratio_percent' => 0,
+            'content_hash' => '',
+            'title' => null,
+            'meta_desc' => null,
+            'h1' => null,
+            'h2_json' => '[]',
+            'canonical' => null,
+            'meta_robots' => null,
+            'schema_types' => null,
+            'is_indexable' => 1,
+            'internal_links' => [],
+            'external_links' => []
+        ];
 
         // Check X-Robots-Tag HTTP Header
-        $isIndexable = 1;
         if (!empty($result['headers']) && strpos(strtolower($result['headers']), 'x-robots-tag: noindex') !== false) {
-            $isIndexable = 0;
             $parseData['is_indexable'] = 0;
             $parseData['meta_robots'] = 'noindex (HTTP header)';
         }
 
-        // Parse if it's HTML
+        // Parse HTML body if content is HTML
         $contentType = $info['content_type'] ?? '';
         if (strpos($contentType, 'text/html') !== false && !empty($body)) {
-            $tmp = Parser::parseHtml($body, $url);
-            if ($tmp)
-                $parseData = $tmp;
-        }
-
-        // Insert Page - Ensure URL is normalized!
-        $normalizedUrl = Parser::normalizeUrl($url);
-
-        $insertPageStmt->execute([
-            $crawlId,
-            $normalizedUrl,
-            $statusCode,
-            $timeMs,
-            $sizeBytes,
-            $parseData['word_count'],
-            $parseData['text_ratio_percent'],
-            $parseData['content_hash'],
-            $parseData['title'],
-            $parseData['meta_desc'],
-            $parseData['h1'],
-            $parseData['h2_json'],
-            $parseData['canonical'],
-            $parseData['meta_robots'],
-            $parseData['schema_types'] ?? null,
-            $parseData['is_indexable'],
-            $qItem['depth'],
-            json_encode($chain)
-        ]);
-
-        // Insert Links & update queue
-        foreach ($parseData['internal_links'] as $link) {
-            $normalizedInternal = Parser::normalizeUrl($link['url']);
-            $insertLinkStmt->execute([$crawlId, $normalizedUrl, $normalizedInternal, $link['anchor'], $link['snippet'], 0]);
-
-            // Limit depth to prevent infinite loops (setting hard cap to 20 for safety)
-            if ($qItem['depth'] < 20) {
-                $insertQueueStmt->execute([$crawlId, $normalizedInternal, $qItem['depth'] + 1]);
+            try {
+                $tmp = Parser::parseHtml($body, $url);
+                if ($tmp)
+                    $parseData = $tmp;
+            } catch (\Exception $parseErr) {
+                // Parser crash should never kill the worker — log and continue
+                try {
+                    $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'ERROR', ?)")->execute([$crawlId, "Parser Error on $url: " . substr($parseErr->getMessage(), 0, 200)]);
+                } catch (\Exception $logErr) {
+                }
             }
         }
+
+        // ---- Insert Page ----
+        $normalizedUrl = Parser::normalizeUrl($url);
+
+        try {
+            $insertPageStmt->execute([
+                $crawlId,
+                $normalizedUrl,
+                $statusCode,
+                $timeMs,
+                $sizeBytes,
+                $parseData['word_count'],
+                $parseData['text_ratio_percent'],
+                $parseData['content_hash'],
+                $parseData['title'],
+                $parseData['meta_desc'],
+                $parseData['h1'],
+                $parseData['h2_json'],
+                $parseData['canonical'],
+                $parseData['meta_robots'],
+                $parseData['schema_types'] ?? null,
+                $parseData['is_indexable'],
+                $qItem['depth'],
+                json_encode($chain)
+            ]);
+        } catch (\Exception $insertErr) {
+            // Duplicate or schema error — log but don't crash
+            try {
+                $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'ERROR', ?)")->execute([$crawlId, "Insert Error for $url: " . substr($insertErr->getMessage(), 0, 200)]);
+            } catch (\Exception $logErr) {
+            }
+        }
+
+        // ---- Insert Links & Queue New URLs ----
+        foreach ($parseData['internal_links'] as $link) {
+            try {
+                $normalizedInternal = Parser::normalizeUrl($link['url']);
+                $insertLinkStmt->execute([$crawlId, $normalizedUrl, $normalizedInternal, $link['anchor'] ?? '', $link['snippet'] ?? '', 0]);
+
+                // Only queue if within depth limit
+                if ($qItem['depth'] < $maxDepth) {
+                    $insertQueueStmt->execute([$crawlId, $normalizedInternal, $qItem['depth'] + 1]);
+                }
+            } catch (\Exception $linkErr) {
+                // Link insert error should never crash worker
+            }
+        }
+
         foreach ($parseData['external_links'] as $link) {
-            $insertLinkStmt->execute([$crawlId, $normalizedUrl, $link['url'], $link['anchor'], $link['snippet'], 1]);
+            try {
+                $insertLinkStmt->execute([$crawlId, $normalizedUrl, $link['url'] ?? '', $link['anchor'] ?? '', $link['snippet'] ?? '', 1]);
+            } catch (\Exception $linkErr) {
+            }
         }
 
         $updateQueueSuccessStmt->execute([$qItem['id']]);
+        $processedCount++;
     }
 
-    // Update counts
-    $db->exec("UPDATE crawls SET urls_crawled = urls_crawled + " . count($results) . " WHERE id = $crawlId");
+    // ---- Update Crawl Counters ----
+    if ($processedCount > 0) {
+        $db->prepare("UPDATE crawls SET urls_crawled = urls_crawled + ? WHERE id = ?")->execute([$processedCount, $crawlId]);
+    }
 
     $db->commit();
 
-    // Check Remaining
+    // ============================================================
+    // 8. REPORT STATUS
+    // ============================================================
     $stmt = $db->prepare("SELECT count(*) FROM crawl_queue WHERE crawl_id = ? AND status = 'PENDING'");
     $stmt->execute([$crawlId]);
     $remaining = $stmt->fetchColumn();
 
-    $execTime = microtime(true) - $startTime;
+    $execTime = round(microtime(true) - $startTime, 2);
+
+    // Log batch summary
+    try {
+        $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'INFO', ?)")->execute([
+            $crawlId,
+            "Batch: {$processedCount} ok, {$errorCount} errors, {$remaining} pending, {$execTime}s"
+        ]);
+    } catch (\Exception $logErr) {
+    }
 
     echo json_encode([
         'message' => 'Batch Processed',
-        'processed' => count($results),
+        'processed' => $processedCount,
+        'errors' => $errorCount,
         'remaining' => $remaining,
-        'execution_time_s' => round($execTime, 2)
+        'execution_time_s' => $execTime
     ]);
 
-} catch (Exception $e) {
+} catch (\Exception $e) {
+    // ============================================================
+    // CRASH-PROOF: If ANYTHING fails, rollback, log, and respond gracefully
+    // ============================================================
     if (isset($db)) {
         if ($db->inTransaction()) {
-            $db->rollBack();
+            try {
+                $db->rollBack();
+            } catch (\Exception $rbErr) {
+            }
         }
         try {
             $errorMsg = substr($e->getMessage(), 0, 500);
-            $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'ERROR', ?)")->execute([$crawlId, "Worker Failure: " . $errorMsg]);
-        } catch (\Exception $e2) {
-            // Cannot even log error
+            $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'ERROR', ?)")->execute([$crawlId, "Worker Crash: " . $errorMsg]);
+        } catch (\Exception $logErr) {
+        }
+
+        // Reset any PROCESSING items back to PENDING so they're not stuck forever
+        try {
+            $db->prepare("UPDATE crawl_queue SET status = 'PENDING' WHERE crawl_id = ? AND status = 'PROCESSING'")->execute([$crawlId]);
+        } catch (\Exception $resetErr) {
         }
     }
+
     http_response_code(500);
-    echo json_encode(['error' => 'Worker Failure: ' . $e->getMessage()]);
+    echo json_encode(['error' => 'Worker encountered an issue. It will auto-recover on next heartbeat.']);
 }
 ?>
