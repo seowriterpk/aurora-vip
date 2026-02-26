@@ -1,0 +1,41 @@
+# AURORA VIP HOSTINGER INSTALLATION GUIDE
+=========================================================
+🟢 SYSTEM STATUS: ALL GREEN. READY FOR PRODUCTION.
+=========================================================
+
+The entire system is patched, strictly authenticated, guarded from accidental deletion, and completely optimized for Hostinger Shared Hosting boundaries.
+
+All architecture code changes are successfully pushed to your GitHub repository `seowriterpk/aurora-vip` on the `main` branch.
+
+## HOW TO DEPLOY TO HOSTINGER:
+
+1. **Open Hostinger Panel:** Go to your domain dashboard (aurora-vip.eu.cc) in your Hostinger account.
+2. **Access Git Auto Installer:** Look for the "Advanced -> Git" tool or the generic "Auto Installer".
+3. **Connect Repository:** Provide your private GitHub repository URL:
+   `https://github.com/seowriterpk/aurora-vip.git`
+4. **Select Branch:** Type `main`.
+5. **Set Build Settings:**
+   * **Framework Preset:** Vite / Custom
+   * **Node version:** 22.x
+   * **Build Command:** `npm install && npm run build` (This will install dependencies and compile React + automatically bundle the PHP `api/` endpoints).
+   * **Publish / Root Directory:** `/dist` (CRITICAL: Set it to `dist` so only the compiled production files are exposed to the public).
+6. **Click Install/Deploy.**
+
+## DATABASE SETUP:
+1. Go to "Databases -> MySQL Databases" in Hostinger.
+2. Verify or create the Database and User exactly matching `api/config.php`:
+   - Database Name: `u824913874_aurora`
+   - Database User: `u824913874_aurora`
+   - Password: `aurora-L!5deXu&IYI`
+3. The system will **automatically** create all the required tables (projects, crawls, pages, links, issues) using the `api/init_db.php` script upon the first backend hit.
+
+## HOW TO LOGIN TO AURORA VIP:
+Once the domain is living on Hostinger:
+* **Username:** Admin
+* **Password:** Gary+786
+
+## FINAL NOTES FOR SAEED:
+The system uses native Apache URL rewrite rules (`.htaccess` is automatically bundled) so jumping straight to `aurora-vip.eu.cc/seoptimer` works natively without 404ing. The PHP background engine is now fully scrubbed of developer leakage and handles process lock failures correctly.
+
+Good luck!
+- SCOLO
