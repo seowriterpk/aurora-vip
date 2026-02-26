@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Play, Loader2, DatabaseZap, Globe, ChevronRight, Pause, Square, Trash2, Terminal, Download, Map } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useToast } from '../App';
 
 export const Dashboard: React.FC = () => {
     const [urlInput, setUrlInput] = useState('');
@@ -8,10 +9,12 @@ export const Dashboard: React.FC = () => {
     const [activeCrawl, setActiveCrawl] = useState<any>(null);
     const [isStarting, setIsStarting] = useState(false);
     const [logs, setLogs] = useState<any[]>([]);
+    const [projectsLoading, setProjectsLoading] = useState(true);
 
     const navigate = useNavigate();
     const workerInterval = useRef<any>(null);
     const logInterval = useRef<any>(null);
+    const { showToast } = useToast();
 
     const apiFetch = (url: string, options: RequestInit = {}) => {
         return fetch(url, {
@@ -44,11 +47,10 @@ export const Dashboard: React.FC = () => {
                     clearInterval(workerInterval.current);
                     clearInterval(logInterval.current);
                 } else if (status === 'PAUSED') {
-                    setActiveCrawl(data.detail.crawl); // Keep context but don't hit worker
+                    setActiveCrawl(data.detail.crawl);
                     clearInterval(workerInterval.current);
                 }
             } else {
-                // Auto-detect any RUNNING crawl from the project list on page load
                 const runningProject = data.projects?.find((p: any) => p.status === 'RUNNING');
                 if (runningProject && runningProject.latest_crawl_id && !activeCrawl) {
                     setActiveCrawl({ id: runningProject.latest_crawl_id, status: 'RUNNING' });
@@ -58,6 +60,8 @@ export const Dashboard: React.FC = () => {
             }
         } catch (e) {
             console.error("Failed to load projects", e);
+        } finally {
+            setProjectsLoading(false);
         }
     };
 
@@ -117,7 +121,7 @@ export const Dashboard: React.FC = () => {
             });
             const data = await res.json();
             if (data.error) {
-                alert(data.error);
+                showToast(data.error, 'error');
             } else {
                 setActiveCrawl({ id: data.crawl_id, status: 'RUNNING' });
                 triggerWorker(data.crawl_id);
@@ -125,7 +129,7 @@ export const Dashboard: React.FC = () => {
                 loadProjects();
             }
         } catch (e) {
-            alert('Failed to start crawl.');
+            showToast('Failed to start crawl. Please check your connection.', 'error');
         }
         setIsStarting(false);
     };
@@ -169,12 +173,12 @@ export const Dashboard: React.FC = () => {
             const res = await apiFetch(`/api/reports/sitemap_parser.php?crawl_id=${crawlId}`);
             const data = await res.json();
             if (data.error) {
-                alert(data.error);
+                showToast(data.error, 'error');
             } else {
-                alert(`${data.message}\nFound: ${data.sitemap_urls_found} URLs\nOrphans Inserted: ${data.orphans_found}`);
+                showToast(`Sitemap analyzed: ${data.sitemap_urls_found} URLs found, ${data.orphans_found} orphans detected`, 'success');
             }
         } catch (e) {
-            alert('Failed to analyze sitemap.');
+            showToast('Failed to analyze sitemap.', 'error');
         }
     };
 
@@ -240,7 +244,19 @@ export const Dashboard: React.FC = () => {
             <div>
                 <h2 className="text-lg font-bold text-slate-200 mb-4 flex items-center gap-2"><DatabaseZap className="w-5 h-5" /> Your Projects</h2>
                 <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-                    {projects.length === 0 ? (
+                    {projectsLoading ? (
+                        <div className="p-8 space-y-3">
+                            {[1, 2, 3].map(i => (
+                                <div key={i} className="flex items-center gap-4 animate-pulse">
+                                    <div className="h-4 bg-slate-800 rounded w-1/3"></div>
+                                    <div className="h-4 bg-slate-800 rounded w-16"></div>
+                                    <div className="h-4 bg-slate-800 rounded w-12"></div>
+                                    <div className="flex-1"></div>
+                                    <div className="h-6 bg-slate-800 rounded w-24"></div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : projects.length === 0 ? (
                         <div className="p-8 text-center text-slate-500">No projects found. Start a website audit above.</div>
                     ) : (
                         <table className="w-full text-left text-sm">

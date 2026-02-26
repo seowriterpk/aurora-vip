@@ -78,7 +78,7 @@ export const Crawler: React.FC = () => {
                     <button onClick={loadData} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-md text-slate-400 hover:text-white transition-colors"><RefreshCw className="w-4 h-4" /></button>
 
                     <a
-                        href={`/api/export.php?crawl_id=${crawlId}&type=pages&token=AURORA_SECRET_2026`}
+                        href={`/api/export.php?crawl_id=${crawlId}&type=pages`}
                         download
                         className="p-2 bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-500/30 rounded-md text-emerald-400 transition-colors flex items-center gap-2 text-sm font-medium"
                     >
@@ -106,7 +106,7 @@ export const Crawler: React.FC = () => {
                         </thead>
                         <tbody className="divide-y divide-slate-800">
                             {loading && data.length === 0 ? (
-                                <tr><td colSpan={9} className="p-8 text-center text-slate-500">Loading fast SQLite wrapper...</td></tr>
+                                <tr><td colSpan={9} className="p-8 text-center text-slate-500"><div className="flex items-center justify-center gap-3"><div className="w-4 h-4 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" /> Loading crawl data...</div></td></tr>
                             ) : data.length === 0 ? (
                                 <tr><td colSpan={9} className="p-8 text-center text-slate-500">No matching URLs found.</td></tr>
                             ) : (

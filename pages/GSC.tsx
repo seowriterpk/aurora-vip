@@ -38,7 +38,7 @@ export const GSC: React.FC = () => {
             </div>
         );
     }
-    if (loading) return <div className="p-8 text-center text-slate-500">Generating Index Coverage Report...</div>;
+    if (loading) return <div className="p-8 flex items-center justify-center gap-3 text-slate-500"><div className="w-4 h-4 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" /> Generating Index Coverage Report...</div>;
     if (!data) return <div className="p-8 text-center text-red-500">Failed to load data.</div>;
 
     const pieData = [

@@ -35,7 +35,7 @@ export const Sitebulb: React.FC = () => {
             </div>
         );
     }
-    if (loading) return <div className="p-8 text-center text-slate-500">Processing graph analysis...</div>;
+    if (loading) return <div className="p-8 flex items-center justify-center gap-3 text-slate-500"><div className="w-4 h-4 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" /> Processing site architecture analysis...</div>;
     if (!data) return <div className="p-8 text-center text-red-500">Failed to load insight data.</div>;
 
     const depthData = data.depth_distribution.map((d: any) => ({
