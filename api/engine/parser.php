@@ -6,7 +6,11 @@ class Parser
     // Basic Simhash implementation for 64-bit fuzzy text matching
     public static function simhash($text)
     {
+        // Cap tokens at 10,000 to prevent CPU spike on massive text bodies
         $tokens = str_word_count(strtolower($text), 1);
+        if (count($tokens) > 10000) {
+            $tokens = array_slice($tokens, 0, 10000);
+        }
         $v = array_fill(0, 64, 0);
 
         foreach ($tokens as $token) {
@@ -55,7 +59,14 @@ class Parser
             $path = rtrim($path, '/');
         }
 
-        $query = isset($parsed['query']) ? '?' . $parsed['query'] : '';
+        // RISK 14 FIX: Sort query parameters alphabetically to prevent
+        // scope explosion from permutations (?a=1&b=2 vs ?b=2&a=1)
+        $query = '';
+        if (isset($parsed['query']) && $parsed['query'] !== '') {
+            parse_str($parsed['query'], $params);
+            ksort($params);
+            $query = '?' . http_build_query($params);
+        }
 
         return "$scheme://$host$port$path$query";
     }
@@ -91,6 +102,14 @@ class Parser
     {
         if (empty($html))
             return null;
+
+        // RISK 4 FIX: Truncate HTML to 500KB for DOM parsing
+        // All SEO signals (title, meta, H1, canonical, schema) are in <head> or early <body>
+        // This prevents 3-5x memory amplification on 1MB+ pages
+        $originalSize = strlen($html);
+        if ($originalSize > 512000) {
+            $html = substr($html, 0, 512000);
+        }
 
         $doc = new DOMDocument();
         libxml_use_internal_errors(true);

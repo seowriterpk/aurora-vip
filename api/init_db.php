@@ -24,22 +24,28 @@ try {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
     // Create Queue Table (For the background worker)
+    // url_hash: SHA2 generated column for true dedup beyond 255-char prefix
+    // updated_at: tracks when status last changed, used for stuck-URL recovery
     $db->exec("CREATE TABLE IF NOT EXISTS crawl_queue (
         id INT AUTO_INCREMENT PRIMARY KEY,
         crawl_id INT NOT NULL,
         url VARCHAR(2048) NOT NULL,
+        url_hash CHAR(64) AS (SHA2(url, 256)) STORED,
         depth INT DEFAULT 0,
         status VARCHAR(50) DEFAULT 'PENDING',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         error_msg TEXT,
         FOREIGN KEY(crawl_id) REFERENCES crawls(id) ON DELETE CASCADE,
-        UNIQUE KEY unique_crawl_url (crawl_id, url(255))
+        UNIQUE KEY unique_crawl_url_hash (crawl_id, url_hash)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
     // Create Pages Table
+    // url_hash: SHA2 generated column for true dedup beyond 255-char prefix
     $db->exec("CREATE TABLE IF NOT EXISTS pages (
         id INT AUTO_INCREMENT PRIMARY KEY,
         crawl_id INT NOT NULL,
         url VARCHAR(2048) NOT NULL,
+        url_hash CHAR(64) AS (SHA2(url, 256)) STORED,
         status_code INT,
         load_time_ms INT,
         size_bytes INT,
@@ -58,10 +64,11 @@ try {
         redirect_chain_json TEXT,
         crawled_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(crawl_id) REFERENCES crawls(id) ON DELETE CASCADE,
-        UNIQUE KEY unique_crawl_page_url (crawl_id, url(255))
+        UNIQUE KEY unique_crawl_page_hash (crawl_id, url_hash)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
     // Create Links Table (For graphing and internal link counts)
+    // UNIQUE KEY on (crawl_id, source_url, target_url) prevents duplicate link rows from retries
     $db->exec("CREATE TABLE IF NOT EXISTS links (
         id INT AUTO_INCREMENT PRIMARY KEY,
         crawl_id INT NOT NULL,
@@ -70,7 +77,8 @@ try {
         anchor_text TEXT,
         html_snippet TEXT,
         is_external TINYINT(1) DEFAULT 0,
-        FOREIGN KEY(crawl_id) REFERENCES crawls(id) ON DELETE CASCADE
+        FOREIGN KEY(crawl_id) REFERENCES crawls(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_link (crawl_id, source_url(191), target_url(191))
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
     // Create Issues Table
@@ -105,7 +113,9 @@ try {
         "CREATE INDEX idx_crawl_queue_status ON crawl_queue(crawl_id, status)",
         "CREATE INDEX idx_pages_crawl_url ON pages(crawl_id, url(255))",
         "CREATE INDEX idx_links_target ON links(crawl_id, target_url(255))",
-        "CREATE INDEX idx_issues_severity ON issues(crawl_id, severity)"
+        "CREATE INDEX idx_links_source ON links(crawl_id, source_url(255))",
+        "CREATE INDEX idx_issues_severity ON issues(crawl_id, severity)",
+        "CREATE INDEX idx_crawl_logs_crawl ON crawl_logs(crawl_id, id)"
     ];
 
     foreach ($indexes as $sql) {

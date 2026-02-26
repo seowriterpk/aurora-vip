@@ -16,7 +16,22 @@ try {
     $db = getDb();
 
     if ($action === 'DELETE') {
-        // Cascade delete will wipe queue, pages, links, issues, and logs inherently
+        // RISK 18 FIX: Delete child rows in chunks FIRST to prevent 5-15s DB lock
+        // CASCADE delete on 500K+ child rows causes a massive single transaction
+        // Solution: delete in 10K-row chunks, then delete the parent
+        $childTables = ['links', 'crawl_queue', 'issues', 'crawl_logs', 'pages'];
+
+        // First get the crawl's ID to target child tables
+        foreach ($childTables as $table) {
+            $deleted = 1;
+            while ($deleted > 0) {
+                $chunkStmt = $db->prepare("DELETE FROM $table WHERE crawl_id = ? LIMIT 10000");
+                $chunkStmt->execute([$crawlId]);
+                $deleted = $chunkStmt->rowCount();
+            }
+        }
+
+        // Now delete the crawl record itself (all children already gone)
         $stmt = $db->prepare("DELETE FROM crawls WHERE id = ?");
         $stmt->execute([$crawlId]);
         echo json_encode(['success' => true, 'message' => "Crawl #$crawlId fully deleted from memory."]);

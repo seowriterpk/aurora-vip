@@ -28,6 +28,25 @@ if (!$crawlId) {
     exit;
 }
 
+// ============================================================
+// SERVER-SIDE LOCK — Prevent concurrent worker.php execution
+// (Handles multiple browser tabs / accidental double-fires)
+// ============================================================
+$lockFile = sys_get_temp_dir() . '/aurora_worker_lock_' . $crawlId . '.lock';
+$lockHandle = fopen($lockFile, 'w');
+if (!flock($lockHandle, LOCK_EX | LOCK_NB)) {
+    // Another worker is already running for this crawl — exit silently
+    fclose($lockHandle);
+    echo json_encode(['message' => 'Worker already active for this crawl. Skipped.']);
+    exit;
+}
+// Lock acquired — register cleanup on shutdown
+register_shutdown_function(function () use ($lockHandle, $lockFile) {
+    flock($lockHandle, LOCK_UN);
+    fclose($lockHandle);
+    @unlink($lockFile);
+});
+
 try {
     $db = getDb();
 
@@ -44,9 +63,10 @@ try {
     }
 
     // ============================================================
-    // 2. RECOVER STUCK URLs (URLs marked PROCESSING for > 3 minutes = likely a crashed worker)
+    // 2. RECOVER STUCK URLs (Only URLs stuck in PROCESSING for > 3 minutes)
+    // This prevents the race condition where two workers reset each other's active batch
     // ============================================================
-    $db->prepare("UPDATE crawl_queue SET status = 'PENDING' WHERE crawl_id = ? AND status = 'PROCESSING'")->execute([$crawlId]);
+    $db->prepare("UPDATE crawl_queue SET status = 'PENDING' WHERE crawl_id = ? AND status = 'PROCESSING' AND updated_at < NOW() - INTERVAL 3 MINUTE")->execute([$crawlId]);
 
     // ============================================================
     // 3. GRAB A BATCH OF PENDING URLs
@@ -65,6 +85,15 @@ try {
             // Crawl is truly complete
             $db->prepare("UPDATE crawls SET status = 'COMPLETED', ended_at = CURRENT_TIMESTAMP WHERE id = ?")->execute([$crawlId]);
             $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'SUCCESS', 'Crawl finished successfully.')")->execute([$crawlId]);
+
+            // ---- RISK 2 FIX: Trim old logs to prevent unbounded growth ----
+            // Keep the most recent 500 logs per crawl, delete the rest
+            try {
+                $db->prepare("DELETE FROM crawl_logs WHERE crawl_id = ? AND id NOT IN (SELECT id FROM (SELECT id FROM crawl_logs WHERE crawl_id = ? ORDER BY id DESC LIMIT 500) AS keep)")->execute([$crawlId, $crawlId]);
+            } catch (\Exception $cleanupErr) {
+                // Non-critical — log cleanup failure should never crash the worker
+            }
+
             echo json_encode(['message' => 'Crawl Completed', 'remaining' => 0]);
         } else {
             echo json_encode(['message' => "Waiting on $processingCount URLs", 'remaining' => 0]);
@@ -128,7 +157,8 @@ try {
         (crawl_id, url, status_code, load_time_ms, size_bytes, word_count, text_ratio_percent, content_hash, title, meta_desc, h1, h2_json, canonical, meta_robots, schema_types, is_indexable, depth, redirect_chain_json) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
-    $insertLinkStmt = $db->prepare("INSERT INTO links (crawl_id, source_url, target_url, anchor_text, html_snippet, is_external) VALUES (?, ?, ?, ?, ?, ?)");
+    // RISK 1 FIX: INSERT IGNORE prevents duplicate link rows from retries/navigation duplication
+    $insertLinkStmt = $db->prepare("INSERT IGNORE INTO links (crawl_id, source_url, target_url, anchor_text, html_snippet, is_external) VALUES (?, ?, ?, ?, ?, ?)");
     $insertQueueStmt = $db->prepare("INSERT IGNORE INTO crawl_queue (crawl_id, url, depth, status) VALUES (?, ?, ?, 'PENDING')");
     $updateQueueSuccessStmt = $db->prepare("UPDATE crawl_queue SET status = 'CRAWLED' WHERE id = ?");
     $updateQueueErrorStmt = $db->prepare("UPDATE crawl_queue SET status = 'ERROR', error_msg = ? WHERE id = ?");
@@ -341,9 +371,9 @@ try {
         } catch (\Exception $logErr) {
         }
 
-        // Reset any PROCESSING items back to PENDING so they're not stuck forever
+        // Reset STUCK URLs (only those stuck > 3 min, not currently active ones)
         try {
-            $db->prepare("UPDATE crawl_queue SET status = 'PENDING' WHERE crawl_id = ? AND status = 'PROCESSING'")->execute([$crawlId]);
+            $db->prepare("UPDATE crawl_queue SET status = 'PENDING' WHERE crawl_id = ? AND status = 'PROCESSING' AND updated_at < NOW() - INTERVAL 3 MINUTE")->execute([$crawlId]);
         } catch (\Exception $resetErr) {
         }
     }
