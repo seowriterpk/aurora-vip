@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, createContext, useContext } from 'react';
+import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { Layout } from './pages/Layout';
 import { Dashboard } from './pages/Dashboard';
@@ -109,10 +109,10 @@ const App: React.FC = () => {
     const [checkingSession, setCheckingSession] = useState<boolean>(true);
     const [toasts, setToasts] = useState<Toast[]>([]);
 
-    let toastIdRef = 0;
+    const toastIdRef = useRef(0);
 
     const showToast = useCallback((message: string, type: ToastType = 'info') => {
-        const id = ++toastIdRef;
+        const id = ++toastIdRef.current;
         setToasts(prev => [...prev.slice(-4), { id, message, type }]); // Max 5 toasts visible
         setTimeout(() => {
             setToasts(prev => prev.filter(t => t.id !== id));

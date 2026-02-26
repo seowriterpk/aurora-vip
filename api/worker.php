@@ -169,11 +169,8 @@ try {
     foreach ($results as $url => $result) {
         // Time budget check — stop processing if we're running out of time
         if ((microtime(true) - $startTime) > $maxExecutionTime) {
-            // Mark remaining URLs back to PENDING so they can be retried
-            foreach ($urlMap as $pendingUrl => $pendingItem) {
-                if (!isset($results[$pendingUrl]) || $results[$pendingUrl] === $result)
-                    continue;
-            }
+            // Time budget exceeded — stop accepting more work
+            // Remaining PROCESSING URLs will be recovered by stuck-URL recovery on next heartbeat
             break;
         }
 

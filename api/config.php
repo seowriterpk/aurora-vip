@@ -21,9 +21,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit();
 }
 
-// Absolute path to the SQLite database
-define('DB_FILE', __DIR__ . '/aurora.sqlite');
-
 // Define Master Password
 define('MASTER_PASSWORD', 'Gary+786');
 
