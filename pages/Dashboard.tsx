@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Loader2, DatabaseZap, Search, Globe, ChevronRight } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Play, Loader2, DatabaseZap, Globe, ChevronRight, Pause, Square, Trash2, Terminal } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 
 const API_HEADERS = {
     'Authorization': 'Bearer AURORA_SECRET_2026',
@@ -12,21 +12,35 @@ export const Dashboard: React.FC = () => {
     const [projects, setProjects] = useState<any[]>([]);
     const [activeCrawl, setActiveCrawl] = useState<any>(null);
     const [isStarting, setIsStarting] = useState(false);
+    const [logs, setLogs] = useState<any[]>([]);
 
-    // Heartbeat Reference
+    const navigate = useNavigate();
     const workerInterval = useRef<any>(null);
+    const logInterval = useRef<any>(null);
 
     const loadProjects = async () => {
         try {
             const res = await fetch('/api/sync_status.php' + (activeCrawl ? `?crawl_id=${activeCrawl.id}` : ''), { headers: API_HEADERS });
             const data = await res.json();
             if (data.projects) setProjects(data.projects);
-            if (data.detail && data.detail.crawl && data.detail.crawl.status === 'RUNNING') {
-                setActiveCrawl(data.detail.crawl);
-                triggerWorker(data.detail.crawl.id);
-            } else if (data.detail && data.detail.crawl && data.detail.crawl.status === 'COMPLETED') {
-                setActiveCrawl(null);
-                clearInterval(workerInterval.current);
+
+            // Check active crawl status from backend
+            if (data.detail && data.detail.crawl) {
+                const status = data.detail.crawl.status;
+                if (status === 'RUNNING') {
+                    if (!activeCrawl || activeCrawl.status !== 'RUNNING') {
+                        setActiveCrawl(data.detail.crawl);
+                        triggerWorker(data.detail.crawl.id);
+                        startLogStream(data.detail.crawl.id);
+                    }
+                } else if (status === 'COMPLETED' || status === 'ERROR') {
+                    setActiveCrawl(null);
+                    clearInterval(workerInterval.current);
+                    clearInterval(logInterval.current);
+                } else if (status === 'PAUSED') {
+                    setActiveCrawl(data.detail.crawl); // Keep context but don't hit worker
+                    clearInterval(workerInterval.current);
+                }
             }
         } catch (e) {
             console.error("Failed to load projects", e);
@@ -35,8 +49,25 @@ export const Dashboard: React.FC = () => {
 
     useEffect(() => {
         loadProjects();
-        return () => clearInterval(workerInterval.current);
+        return () => {
+            clearInterval(workerInterval.current);
+            clearInterval(logInterval.current);
+        };
     }, []);
+
+    const fetchLogs = async (crawlId: number) => {
+        try {
+            const res = await fetch(`/api/get_logs.php?crawl_id=${crawlId}`, { headers: API_HEADERS });
+            const data = await res.json();
+            if (data.logs) setLogs(data.logs);
+        } catch (e) { }
+    }
+
+    const startLogStream = (crawlId: number) => {
+        if (logInterval.current) clearInterval(logInterval.current);
+        fetchLogs(crawlId);
+        logInterval.current = setInterval(() => fetchLogs(crawlId), 3000);
+    }
 
     const triggerWorker = async (crawlId: number) => {
         if (workerInterval.current) return;
@@ -45,8 +76,6 @@ export const Dashboard: React.FC = () => {
             try {
                 const res = await fetch(`/api/worker.php?crawl_id=${crawlId}`, { headers: API_HEADERS });
                 const data = await res.json();
-
-                // Refresh UI aggressively while running
                 loadProjects();
 
                 if (data.message === 'Crawl Completed' || data.error) {
@@ -55,12 +84,12 @@ export const Dashboard: React.FC = () => {
                     setActiveCrawl(null);
                 }
             } catch (e) {
-                console.error("Worker error, will retry on next tick", e);
+                console.error("Worker error, retry...", e);
             }
         };
 
-        // Fire heavily, let PHP manage its own timeout
         pingWorker();
+        // Hostinger specific: heartbeat every 5s instead of rapid loop
         workerInterval.current = setInterval(pingWorker, 5000);
     };
 
@@ -79,6 +108,7 @@ export const Dashboard: React.FC = () => {
             } else {
                 setActiveCrawl({ id: data.crawl_id, status: 'RUNNING' });
                 triggerWorker(data.crawl_id);
+                startLogStream(data.crawl_id);
                 loadProjects();
             }
         } catch (e) {
@@ -87,43 +117,99 @@ export const Dashboard: React.FC = () => {
         setIsStarting(false);
     };
 
+    const handleAction = async (crawlId: number, action: string) => {
+        try {
+            await fetch('/api/manage_crawl.php', {
+                method: 'POST',
+                headers: API_HEADERS,
+                body: JSON.stringify({ crawl_id: crawlId, action })
+            });
+
+            if (action === 'DELETE') {
+                if (activeCrawl?.id === crawlId) {
+                    setActiveCrawl(null);
+                    setLogs([]);
+                    clearInterval(workerInterval.current);
+                    clearInterval(logInterval.current);
+                    workerInterval.current = null;
+                }
+                loadProjects();
+            } else if (action === 'PAUSE' || action === 'STOP') {
+                clearInterval(workerInterval.current);
+                workerInterval.current = null;
+                if (action === 'STOP') setActiveCrawl(null);
+                loadProjects();
+            } else if (action === 'RESUME') {
+                setActiveCrawl({ id: crawlId, status: 'RUNNING' });
+                triggerWorker(crawlId);
+                loadProjects();
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
     return (
-        <div className="max-w-6xl mx-auto space-y-8">
+        <div className="max-w-6xl mx-auto space-y-8 pb-10">
+            {/* Start Panel */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 shadow-sm">
                 <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2"><Globe className="w-5 h-5 text-indigo-400" /> Start New Audit</h2>
-                <p className="text-slate-400 text-sm mb-6">Enter a root domain to initiate the PHP SQLite crawler engine.</p>
+                <p className="text-slate-400 text-sm mb-6">Enter a root domain to initiate the PHP Hostinger crawler engine.</p>
 
                 <div className="flex gap-3">
                     <input
                         type="text"
                         value={urlInput}
                         onChange={e => setUrlInput(e.target.value)}
-                        disabled={!!activeCrawl || isStarting}
+                        disabled={!!activeCrawl && activeCrawl.status === 'RUNNING'}
                         placeholder="https://example.com"
                         className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:border-indigo-500 outline-none disabled:opacity-50"
                     />
                     <button
                         onClick={startNewCrawl}
-                        disabled={!!activeCrawl || isStarting}
+                        disabled={!!activeCrawl && activeCrawl.status === 'RUNNING' || isStarting}
                         className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-800 disabled:text-slate-500 text-white px-8 py-3 rounded-lg font-medium transition-colors flex items-center gap-2"
                     >
-                        {activeCrawl ? <><Loader2 className="w-4 h-4 animate-spin" /> Crawling...</> : <><Play className="w-4 h-4 fill-current" /> Start Engine</>}
+                        {!!activeCrawl && activeCrawl.status === 'RUNNING' ? <><Loader2 className="w-4 h-4 animate-spin" /> Crawling...</> : <><Play className="w-4 h-4 fill-current" /> Start Engine</>}
                     </button>
                 </div>
-
-                {activeCrawl && (
-                    <div className="mt-4 bg-indigo-950/30 border border-indigo-500/30 rounded-lg p-4 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <div className="w-2 h-2 rounded-full bg-indigo-500 animate-ping"></div>
-                            <span className="text-indigo-300 text-sm font-medium">Engine is active. Processing background queues...</span>
-                        </div>
-                        <div className="text-xs text-slate-400 font-mono">Crawl ID: {activeCrawl.id}</div>
-                    </div>
-                )}
             </div>
 
+            {/* Live Terminal Log */}
+            {activeCrawl && (
+                <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-sm flex flex-col h-64">
+                    <div className="bg-slate-900 border-b border-slate-800 p-3 flex justify-between items-center shrink-0">
+                        <h3 className="text-xs font-semibold text-slate-400 flex items-center gap-2 uppercase tracking-wider">
+                            <Terminal className="w-4 h-4" /> Live Engine Output (Crawl #{activeCrawl.id})
+                        </h3>
+                        {activeCrawl.status === 'RUNNING' ? (
+                            <div className="flex items-center gap-2 text-indigo-400 text-xs font-mono">
+                                <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span> PROCESSING
+                            </div>
+                        ) : (
+                            <div className="flex items-center gap-2 text-amber-500 text-xs font-mono">
+                                <span className="w-2 h-2 rounded-full bg-amber-500"></span> PAUSED
+                            </div>
+                        )}
+                    </div>
+                    <div className="p-4 overflow-y-auto flex-1 font-mono text-xs space-y-1">
+                        {logs.length === 0 ? (
+                            <div className="text-slate-600">Waiting for engine heartbeat...</div>
+                        ) : (
+                            logs.map((log, i) => (
+                                <div key={i} className="flex gap-3 hover:bg-slate-900/50 p-1 rounded">
+                                    <span className="text-slate-600 shrink-0">[{log.created_at.split(' ')[1]}]</span>
+                                    <span className={log.type === 'ERROR' ? 'text-red-400' : log.type === 'SUCCESS' ? 'text-green-400' : 'text-slate-300'}>{log.message}</span>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Project List & Controls */}
             <div>
-                <h2 className="text-lg font-bold text-slate-200 mb-4 flex items-center gap-2"><DatabaseZap className="w-5 h-5" /> Project History</h2>
+                <h2 className="text-lg font-bold text-slate-200 mb-4 flex items-center gap-2"><DatabaseZap className="w-5 h-5" /> Project Management</h2>
                 <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
                     {projects.length === 0 ? (
                         <div className="p-8 text-center text-slate-500">No projects found. Start a crawl above.</div>
@@ -132,28 +218,61 @@ export const Dashboard: React.FC = () => {
                             <thead className="bg-slate-950 text-slate-400">
                                 <tr>
                                     <th className="px-6 py-4 font-medium">Domain</th>
-                                    <th className="px-6 py-4 font-medium">Last Crawl</th>
+                                    <th className="px-6 py-4 font-medium">Status</th>
                                     <th className="px-6 py-4 font-medium text-center">URLs Parsed</th>
-                                    <th className="px-6 py-4 font-medium text-right">Actions</th>
+                                    <th className="px-6 py-4 font-medium text-right">Controls</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800">
                                 {projects.map(p => (
-                                    <tr key={p.project_id} className="hover:bg-slate-800/50 transition-colors">
+                                    <tr key={p.latest_crawl_id || p.project_id} className="hover:bg-slate-800/50 transition-colors">
                                         <td className="px-6 py-4 font-medium text-slate-200">{p.domain}</td>
                                         <td className="px-6 py-4 text-slate-400">
-                                            <div className="flex items-center gap-2">
-                                                <span className={`w-2 h-2 rounded-full ${p.status === 'RUNNING' ? 'bg-indigo-500 animate-pulse' : p.status === 'COMPLETED' ? 'bg-green-500' : 'bg-slate-500'}`}></span>
-                                                {p.status || 'NO DATA'} <span className="text-xs opacity-50 ml-2">{p.started_at}</span>
+                                            <div className="flex items-center gap-2 font-mono text-xs">
+                                                <span className={`w-2 h-2 rounded-full ${p.status === 'RUNNING' ? 'bg-indigo-500 animate-pulse' : p.status === 'COMPLETED' ? 'bg-green-500' : p.status === 'PAUSED' ? 'bg-amber-500' : 'bg-red-500'}`}></span>
+                                                {p.status || 'NO DATA'}
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 text-center font-mono text-slate-300">{p.urls_crawled || 0}</td>
-                                        <td className="px-6 py-4 text-right">
-                                            {p.latest_crawl_id && (
-                                                <Link to={`/crawler?crawl_id=${p.latest_crawl_id}`} className="inline-flex items-center gap-1 text-indigo-400 hover:text-indigo-300 text-xs font-semibold uppercase tracking-wider bg-indigo-500/10 hover:bg-indigo-500/20 px-3 py-1.5 rounded transition-colors">
-                                                    View Report <ChevronRight className="w-3 h-3" />
-                                                </Link>
-                                            )}
+
+                                        <td className="px-6 py-4">
+                                            <div className="flex justify-end items-center gap-2">
+                                                {/* Start/Pause controls for active runs */}
+                                                {p.status === 'RUNNING' && (
+                                                    <button onClick={() => handleAction(p.latest_crawl_id, 'PAUSE')} className="p-1.5 text-amber-500 hover:bg-amber-500/10 rounded" title="Pause Crawl">
+                                                        <Pause className="w-4 h-4" />
+                                                    </button>
+                                                )}
+                                                {p.status === 'PAUSED' && (
+                                                    <button onClick={() => handleAction(p.latest_crawl_id, 'RESUME')} className="p-1.5 text-indigo-400 hover:bg-indigo-500/10 rounded" title="Resume Crawl">
+                                                        <Play className="w-4 h-4" />
+                                                    </button>
+                                                )}
+                                                {(p.status === 'RUNNING' || p.status === 'PAUSED') && (
+                                                    <button onClick={() => handleAction(p.latest_crawl_id, 'STOP')} className="p-1.5 text-slate-400 hover:bg-slate-500/10 rounded" title="Stop & Mark Completed">
+                                                        <Square className="w-4 h-4 fill-current" />
+                                                    </button>
+                                                )}
+
+                                                {/* Global delete button */}
+                                                {p.latest_crawl_id && (
+                                                    <button onClick={() => { if (confirm('Delete entire project and clear memory?')) handleAction(p.latest_crawl_id, 'DELETE') }} className="p-1.5 text-red-500 hover:bg-red-500/10 rounded ml-2" title="Delete Project">
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                )}
+
+                                                <div className="w-px h-6 bg-slate-700 mx-2"></div>
+
+                                                {p.latest_crawl_id && (
+                                                    <button
+                                                        onClick={() => {
+                                                            navigate(`/crawler?crawl_id=${p.latest_crawl_id}`);
+                                                        }}
+                                                        className="inline-flex items-center gap-1 text-indigo-400 hover:text-indigo-300 text-xs font-semibold uppercase tracking-wider bg-indigo-500/10 hover:bg-indigo-500/20 px-3 py-1.5 rounded transition-colors">
+                                                        View Report <ChevronRight className="w-3 h-3" />
+                                                    </button>
+                                                )}
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}

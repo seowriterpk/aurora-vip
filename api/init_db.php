@@ -88,6 +88,16 @@ try {
         FOREIGN KEY(page_id) REFERENCES pages(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
+    // Create Logs Table
+    $db->exec("CREATE TABLE IF NOT EXISTS crawl_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        crawl_id INT NOT NULL,
+        type VARCHAR(50) DEFAULT 'INFO',
+        message TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(crawl_id) REFERENCES crawls(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
     // Indexes for absolute performance
     $db->exec("CREATE INDEX idx_crawl_queue_status ON crawl_queue(crawl_id, status)");
     $db->exec("CREATE INDEX idx_pages_crawl_url ON pages(crawl_id, url(255))");

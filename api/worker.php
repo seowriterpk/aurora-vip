@@ -11,6 +11,11 @@ $startTime = microtime(true);
 $maxExecutionTime = 40; // Aim to finish within 40 seconds
 $batchSize = 10; // Number of URLs to process concurrently per heartbeat
 
+// CRITICAL: Ensure session is unlocked so frontend UI polling doesn't freeze
+if (session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
+}
+
 $crawlId = $_GET['crawl_id'] ?? 0;
 
 if (!$crawlId) {
@@ -28,7 +33,7 @@ try {
     $crawlStatus = $stmt->fetchColumn();
 
     if ($crawlStatus !== 'RUNNING') {
-        echo json_encode(['message' => "Crawl is $crawlStatus"]);
+        echo json_encode(['message' => "Crawl is $crawlStatus. Worker stopped."]);
         exit;
     }
 
@@ -45,6 +50,7 @@ try {
 
         if ($processingCount == 0) {
             $db->prepare("UPDATE crawls SET status = 'COMPLETED', ended_at = CURRENT_TIMESTAMP WHERE id = ?")->execute([$crawlId]);
+            $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'SUCCESS', 'Crawl finished successfully.')")->execute([$crawlId]);
             echo json_encode(['message' => 'Crawl Completed', 'remaining' => 0]);
         } else {
             echo json_encode(['message' => "Waiting on $processingCount URLs", 'remaining' => 0]);
@@ -171,8 +177,16 @@ try {
     ]);
 
 } catch (Exception $e) {
-    if (isset($db) && $db->inTransaction()) {
-        $db->rollBack();
+    if (isset($db)) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        try {
+            $errorMsg = substr($e->getMessage(), 0, 500);
+            $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'ERROR', ?)")->execute([$crawlId, "Worker Failure: " . $errorMsg]);
+        } catch (\Exception $e2) {
+            // Cannot even log error
+        }
     }
     http_response_code(500);
     echo json_encode(['error' => 'Worker Failure: ' . $e->getMessage()]);

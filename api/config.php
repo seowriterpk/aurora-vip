@@ -18,12 +18,14 @@ function authenticate()
 {
     $headers = getallheaders();
     $token = $headers['Authorization'] ?? '';
-    // This is a basic static token for local/shared-hosting protection.
-    // In production, pass 'Bearer AURORA_SECRET_2026' from your frontend request.
     if ($token !== 'Bearer AURORA_SECRET_2026') {
         http_response_code(401);
         echo json_encode(['error' => 'Unauthorized']);
         exit;
+    }
+    // CRITICAL: Release session lock immediately so Hostinger can process concurrent requests
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
     }
 }
 
