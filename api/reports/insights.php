@@ -21,7 +21,7 @@ try {
     // 2. True Orphan Pages (Cross-referenced from XML Sitemap)
     // We now fetch these directly from the `issues` table populated by `sitemap_parser.php`
     $stmt = $db->prepare("
-        SELECT message as url 
+        SELECT url 
         FROM issues 
         WHERE crawl_id = ? AND type = 'orphan_page'
         ORDER BY id DESC

@@ -84,10 +84,10 @@ try {
 
     // 3. Mark them in the database for the Insight Reports to read
     $db->beginTransaction();
-    $insertOrphan = $db->prepare("INSERT IGNORE INTO issues (crawl_id, page_id, type, severity, message) VALUES (?, 0, 'orphan_page', 'High', ?)");
+    $insertOrphan = $db->prepare("INSERT IGNORE INTO issues (crawl_id, page_id, url, type, severity, message) VALUES (?, NULL, ?, 'orphan_page', 'High', 'URL found in XML Sitemap but not discovered via internal links.')");
 
     foreach ($orphanUrls as $orphan) {
-        $insertOrphan->execute([$crawlId, 'Orphan URL found in XML Sitemap but not discovered via internal links: ' . $orphan]);
+        $insertOrphan->execute([$crawlId, $orphan]);
     }
     $db->commit();
 

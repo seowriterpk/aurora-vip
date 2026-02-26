@@ -74,10 +74,12 @@ try {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
     // Create Issues Table
+    // NOTE: page_id is nullable because sitemap_parser inserts orphan-page issues with no matching page record
     $db->exec("CREATE TABLE IF NOT EXISTS issues (
         id INT AUTO_INCREMENT PRIMARY KEY,
         crawl_id INT NOT NULL,
-        page_id INT NOT NULL,
+        page_id INT DEFAULT NULL,
+        url VARCHAR(2048) DEFAULT NULL,
         type VARCHAR(100) NOT NULL,
         severity VARCHAR(50) NOT NULL,
         message TEXT NOT NULL,
@@ -85,8 +87,7 @@ try {
         recommendation TEXT,
         html_location TEXT,
         offending_link TEXT,
-        FOREIGN KEY(crawl_id) REFERENCES crawls(id) ON DELETE CASCADE,
-        FOREIGN KEY(page_id) REFERENCES pages(id) ON DELETE CASCADE
+        FOREIGN KEY(crawl_id) REFERENCES crawls(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
     // Create Logs Table
