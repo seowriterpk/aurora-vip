@@ -291,6 +291,17 @@ export const Dashboard: React.FC = () => {
                                                 {p.latest_crawl_id && (
                                                     <button
                                                         onClick={() => {
+                                                            navigate(`?crawl_id=${p.latest_crawl_id}`);
+                                                            alert(`Project ${p.domain} Selected. You can now use the sidebar tools.`);
+                                                        }}
+                                                        className="inline-flex items-center gap-1 text-slate-300 hover:text-white text-xs font-semibold uppercase tracking-wider bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded transition-colors">
+                                                        Select Project
+                                                    </button>
+                                                )}
+
+                                                {p.latest_crawl_id && (
+                                                    <button
+                                                        onClick={() => {
                                                             navigate(`/crawler?crawl_id=${p.latest_crawl_id}`);
                                                         }}
                                                         className="inline-flex items-center gap-1 text-indigo-400 hover:text-indigo-300 text-xs font-semibold uppercase tracking-wider bg-indigo-500/10 hover:bg-indigo-500/20 px-3 py-1.5 rounded transition-colors">
