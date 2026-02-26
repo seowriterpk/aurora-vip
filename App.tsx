@@ -9,12 +9,29 @@ import { Sitebulb } from './pages/Sitebulb';
 import { Login } from './pages/Login';
 
 const App: React.FC = () => {
-    // Basic local state for login (session is verified backend)
     const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+    const [checkingSession, setCheckingSession] = useState<boolean>(true);
 
-    // In a real app we'd ping the backend to verify session cookie on load, 
-    // but for this internal tool, just showing the lock screen until they hit Auth is sufficient 
-    // since the API endpoints will throw 401s if the session is invalid anyway.
+    // On app load, ping backend to check if session cookie is still valid
+    useEffect(() => {
+        fetch('/api/sync_status.php', { credentials: 'include' })
+            .then(res => {
+                if (res.ok) {
+                    setIsAuthenticated(true);
+                }
+            })
+            .catch(() => { })
+            .finally(() => setCheckingSession(false));
+    }, []);
+
+    // Show nothing while checking session (prevents flash of login screen)
+    if (checkingSession) {
+        return (
+            <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+                <div className="text-slate-500 text-sm font-mono">Verifying session...</div>
+            </div>
+        );
+    }
 
     if (!isAuthenticated) {
         return <Login onLogin={() => setIsAuthenticated(true)} />;

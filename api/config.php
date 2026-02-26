@@ -2,8 +2,16 @@
 session_start();
 
 // AURORA-X Base Configuration
-header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Headers: Content-Type, Authorization");
+// IMPORTANT: Access-Control-Allow-Origin: * is incompatible with credentials:include.
+// For same-origin (Hostinger), we don't actually need CORS headers, but in case of
+// dev proxy or subdomains, we dynamically reflect the requesting origin.
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin) {
+    header("Access-Control-Allow-Origin: $origin");
+} else {
+    header("Access-Control-Allow-Origin: *");
+}
+header("Access-Control-Allow-Headers: Content-Type");
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
 header("Content-Type: application/json; charset=UTF-8");

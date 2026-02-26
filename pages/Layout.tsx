@@ -46,7 +46,7 @@ export const Layout: React.FC = () => {
                 <div className="p-4 border-t border-slate-800">
                     <button
                         onClick={() => {
-                            fetch('/api/logout.php').finally(() => {
+                            fetch('/api/logout.php', { credentials: 'include' }).finally(() => {
                                 window.location.href = '/';
                             });
                         }}

@@ -1,12 +1,7 @@
 <?php
 require_once __DIR__ . '/config.php';
-// We don't authenticate hard because this will be an href download link,
-// but we require the token in a query param
-$token = $_GET['token'] ?? '';
-if ($token !== 'AURORA_SECRET_2026') {
-    http_response_code(401);
-    die('Unauthorized Export');
-}
+// Authenticate via session cookie (browser sends it automatically on <a> download clicks)
+authenticate();
 
 $crawlId = $_GET['crawl_id'] ?? 0;
 $type = $_GET['type'] ?? 'pages'; // pages, links, issues

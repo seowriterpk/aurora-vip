@@ -1,6 +1,6 @@
 <?php
-require_once __DIR__ . '/config.php';
-require_once __DIR__ . '/engine/parser.php';
+require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../engine/parser.php';
 
 authenticate();
 
@@ -84,10 +84,10 @@ try {
 
     // 3. Mark them in the database for the Insight Reports to read
     $db->beginTransaction();
-    $insertOrphan = $db->prepare("INSERT IGNORE INTO issues (crawl_id, url, issue_type, severity, description) VALUES (?, ?, 'orphan_page', 'High', 'URL found in XML Sitemap but contains zero incoming internal links from a standard web crawl.')");
+    $insertOrphan = $db->prepare("INSERT IGNORE INTO issues (crawl_id, page_id, type, severity, message) VALUES (?, 0, 'orphan_page', 'High', ?)");
 
     foreach ($orphanUrls as $orphan) {
-        $insertOrphan->execute([$crawlId, $orphan]);
+        $insertOrphan->execute([$crawlId, 'Orphan URL found in XML Sitemap but not discovered via internal links: ' . $orphan]);
     }
     $db->commit();
 

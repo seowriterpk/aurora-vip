@@ -21,9 +21,9 @@ try {
     // 2. True Orphan Pages (Cross-referenced from XML Sitemap)
     // We now fetch these directly from the `issues` table populated by `sitemap_parser.php`
     $stmt = $db->prepare("
-        SELECT url 
+        SELECT message as url 
         FROM issues 
-        WHERE crawl_id = ? AND issue_type = 'orphan_page'
+        WHERE crawl_id = ? AND type = 'orphan_page'
         ORDER BY id DESC
         LIMIT 50
     ");
@@ -41,16 +41,7 @@ try {
     $stmt->execute([$crawlId]);
     $brokenInternalLinks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // 4. Case-Sensitive Slug Mismatches (Links pointing to uppercase URLs but returning 200/canonicalized to lowercase)
-    // Approximated by finding links where target_url has uppercase letters.
-    $stmt = $db->prepare("
-        SELECT source_url, target_url 
-        FROM links 
-        WHERE crawl_id = ? AND is_external = 0 
-        AND target_url GLOB '*[A-Z]*' 
-        LIMIT 10
-    ");
-    // SQLite GLOB is case sensitive. MySQL doesn't have GLOB exactly like this, we use REGEXP binary.
+    // 4. Case-Sensitive Slug Mismatches (Links with uppercase in URL paths)
     $stmt = $db->prepare("
         SELECT source_url, target_url 
         FROM links 
