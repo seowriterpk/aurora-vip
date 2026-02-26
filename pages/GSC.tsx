@@ -17,7 +17,7 @@ export const GSC: React.FC = () => {
     useEffect(() => {
         if (!crawlId) return;
         setLoading(true);
-        fetch(`/api/reports/coverage.php?crawl_id=${crawlId}`)
+        fetch(`/api/reports/coverage.php?crawl_id=${crawlId}`, { credentials: 'include' })
             .then(res => res.json())
             .then(json => {
                 if (json.coverage) setData(json);

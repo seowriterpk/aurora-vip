@@ -24,15 +24,9 @@ function authenticate()
 {
     // Check if the user is authenticated via session
     if (!isset($_SESSION['authenticated']) || $_SESSION['authenticated'] !== true) {
-        $headers = getallheaders();
-        $token = $headers['Authorization'] ?? '';
-
-        // Fallback or explicit programmatic token for scheduled cron jobs (Worker script)
-        if ($token !== 'Bearer AURORA_SECRET_2026') {
-            http_response_code(401);
-            echo json_encode(['error' => 'Unauthorized']);
-            exit;
-        }
+        http_response_code(401);
+        echo json_encode(['error' => 'Unauthorized. Please log in.']);
+        exit;
     }
     // CRITICAL: Release session lock immediately so Hostinger can process concurrent requests
     if (session_status() === PHP_SESSION_ACTIVE) {

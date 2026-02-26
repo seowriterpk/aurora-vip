@@ -15,6 +15,7 @@ export const Login: React.FC<{ onLogin: () => void }> = ({ onLogin }) => {
         try {
             const res = await fetch('/api/login.php', {
                 method: 'POST',
+                credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password })
             });

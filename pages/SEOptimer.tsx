@@ -20,7 +20,7 @@ export const SEOptimer: React.FC = () => {
         try {
             // make sure it matches the exact crawled URL format
             const cleanUrl = urlInput.trim();
-            const res = await fetch(`/api/reports/onpage.php?crawl_id=${crawlId}&url=${encodeURIComponent(cleanUrl)}`);
+            const res = await fetch(`/api/reports/onpage.php?crawl_id=${crawlId}&url=${encodeURIComponent(cleanUrl)}`, { credentials: 'include' });
             const json = await res.json();
             if (json.error) setError(json.error);
             else setData(json);

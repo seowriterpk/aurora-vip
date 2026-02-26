@@ -14,7 +14,7 @@ export const Sitebulb: React.FC = () => {
     useEffect(() => {
         if (!crawlId) return;
         setLoading(true);
-        fetch(`/api/reports/insights.php?crawl_id=${crawlId}`)
+        fetch(`/api/reports/insights.php?crawl_id=${crawlId}`, { credentials: 'include' })
             .then(res => res.json())
             .then(json => {
                 if (!json.error) setData(json);

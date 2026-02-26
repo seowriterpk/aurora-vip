@@ -19,7 +19,7 @@ export const Crawler: React.FC = () => {
         if (!crawlId) return;
         setLoading(true);
         try {
-            const res = await fetch(`/api/get_pages.php?crawl_id=${crawlId}&limit=${limit}&offset=${page * limit}&search=${encodeURIComponent(search)}`);
+            const res = await fetch(`/api/get_pages.php?crawl_id=${crawlId}&limit=${limit}&offset=${page * limit}&search=${encodeURIComponent(search)}`, { credentials: 'include' });
             const json = await res.json();
             if (json.data) {
                 setData(json.data);

@@ -2,12 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Play, Loader2, DatabaseZap, Globe, ChevronRight, Pause, Square, Trash2, Terminal, Download, Map } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
-const API_HEADERS = {
-    'Content-Type': 'application/json'
-};
-
 export const Dashboard: React.FC = () => {
-    const [urlInput, setUrlInput] = useState('https://girlswagroup.link');
+    const [urlInput, setUrlInput] = useState('');
     const [projects, setProjects] = useState<any[]>([]);
     const [activeCrawl, setActiveCrawl] = useState<any>(null);
     const [isStarting, setIsStarting] = useState(false);
@@ -17,9 +13,20 @@ export const Dashboard: React.FC = () => {
     const workerInterval = useRef<any>(null);
     const logInterval = useRef<any>(null);
 
+    const apiFetch = (url: string, options: RequestInit = {}) => {
+        return fetch(url, {
+            ...options,
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(options.headers || {})
+            }
+        });
+    };
+
     const loadProjects = async () => {
         try {
-            const res = await fetch('/api/sync_status.php' + (activeCrawl ? `?crawl_id=${activeCrawl.id}` : ''), { headers: API_HEADERS });
+            const res = await apiFetch('/api/sync_status.php' + (activeCrawl ? `?crawl_id=${activeCrawl.id}` : ''));
             const data = await res.json();
             if (data.projects) setProjects(data.projects);
 
@@ -40,6 +47,14 @@ export const Dashboard: React.FC = () => {
                     setActiveCrawl(data.detail.crawl); // Keep context but don't hit worker
                     clearInterval(workerInterval.current);
                 }
+            } else {
+                // Auto-detect any RUNNING crawl from the project list on page load
+                const runningProject = data.projects?.find((p: any) => p.status === 'RUNNING');
+                if (runningProject && runningProject.latest_crawl_id && !activeCrawl) {
+                    setActiveCrawl({ id: runningProject.latest_crawl_id, status: 'RUNNING' });
+                    triggerWorker(runningProject.latest_crawl_id);
+                    startLogStream(runningProject.latest_crawl_id);
+                }
             }
         } catch (e) {
             console.error("Failed to load projects", e);
@@ -56,7 +71,7 @@ export const Dashboard: React.FC = () => {
 
     const fetchLogs = async (crawlId: number) => {
         try {
-            const res = await fetch(`/api/get_logs.php?crawl_id=${crawlId}`, { headers: API_HEADERS });
+            const res = await apiFetch(`/api/get_logs.php?crawl_id=${crawlId}`);
             const data = await res.json();
             if (data.logs) setLogs(data.logs);
         } catch (e) { }
@@ -73,7 +88,7 @@ export const Dashboard: React.FC = () => {
 
         const pingWorker = async () => {
             try {
-                const res = await fetch(`/api/worker.php?crawl_id=${crawlId}`, { headers: API_HEADERS });
+                const res = await apiFetch(`/api/worker.php?crawl_id=${crawlId}`);
                 const data = await res.json();
                 loadProjects();
 
@@ -96,9 +111,8 @@ export const Dashboard: React.FC = () => {
         if (!urlInput) return;
         setIsStarting(true);
         try {
-            const res = await fetch('/api/start_crawl.php', {
+            const res = await apiFetch('/api/start_crawl.php', {
                 method: 'POST',
-                headers: API_HEADERS,
                 body: JSON.stringify({ url: urlInput })
             });
             const data = await res.json();
@@ -121,9 +135,8 @@ export const Dashboard: React.FC = () => {
         if (action === 'STOP' && !window.confirm("Are you sure you want to stop this active crawl?")) return;
 
         try {
-            await fetch('/api/manage_crawl.php', {
+            await apiFetch('/api/manage_crawl.php', {
                 method: 'POST',
-                headers: API_HEADERS,
                 body: JSON.stringify({ crawl_id: crawlId, action })
             });
 
@@ -153,7 +166,7 @@ export const Dashboard: React.FC = () => {
 
     const analyzeSitemap = async (crawlId: number) => {
         try {
-            const res = await fetch(`/api/reports/sitemap_parser.php?crawl_id=${crawlId}`, { headers: API_HEADERS });
+            const res = await apiFetch(`/api/reports/sitemap_parser.php?crawl_id=${crawlId}`);
             const data = await res.json();
             if (data.error) {
                 alert(data.error);
@@ -169,8 +182,8 @@ export const Dashboard: React.FC = () => {
         <div className="max-w-6xl mx-auto space-y-8 pb-10">
             {/* Start Panel */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 shadow-sm">
-                <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2"><Globe className="w-5 h-5 text-indigo-400" /> Start New Audit</h2>
-                <p className="text-slate-400 text-sm mb-6">Enter a root domain to initiate the PHP Hostinger crawler engine.</p>
+                <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2"><Globe className="w-5 h-5 text-indigo-400" /> Start New Website Audit</h2>
+                <p className="text-slate-400 text-sm mb-6">Enter your website URL below to start a full SEO crawl and analysis. Aurora will scan every page and generate detailed reports.</p>
 
                 <div className="flex gap-3">
                     <input
@@ -186,7 +199,7 @@ export const Dashboard: React.FC = () => {
                         disabled={!!activeCrawl && activeCrawl.status === 'RUNNING' || isStarting}
                         className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-800 disabled:text-slate-500 text-white px-8 py-3 rounded-lg font-medium transition-colors flex items-center gap-2"
                     >
-                        {!!activeCrawl && activeCrawl.status === 'RUNNING' ? <><Loader2 className="w-4 h-4 animate-spin" /> Crawling...</> : <><Play className="w-4 h-4 fill-current" /> Start Engine</>}
+                        {!!activeCrawl && activeCrawl.status === 'RUNNING' ? <><Loader2 className="w-4 h-4 animate-spin" /> Crawling...</> : <><Play className="w-4 h-4 fill-current" /> Start Audit</>}
                     </button>
                 </div>
             </div>
@@ -225,18 +238,18 @@ export const Dashboard: React.FC = () => {
 
             {/* Project List & Controls */}
             <div>
-                <h2 className="text-lg font-bold text-slate-200 mb-4 flex items-center gap-2"><DatabaseZap className="w-5 h-5" /> Project Management</h2>
+                <h2 className="text-lg font-bold text-slate-200 mb-4 flex items-center gap-2"><DatabaseZap className="w-5 h-5" /> Your Projects</h2>
                 <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
                     {projects.length === 0 ? (
-                        <div className="p-8 text-center text-slate-500">No projects found. Start a crawl above.</div>
+                        <div className="p-8 text-center text-slate-500">No projects found. Start a website audit above.</div>
                     ) : (
                         <table className="w-full text-left text-sm">
                             <thead className="bg-slate-950 text-slate-400">
                                 <tr>
-                                    <th className="px-6 py-4 font-medium">Domain</th>
+                                    <th className="px-6 py-4 font-medium">Website</th>
                                     <th className="px-6 py-4 font-medium">Status</th>
-                                    <th className="px-6 py-4 font-medium text-center">URLs Parsed</th>
-                                    <th className="px-6 py-4 font-medium text-right">Controls & Export</th>
+                                    <th className="px-6 py-4 font-medium text-center">Pages Found</th>
+                                    <th className="px-6 py-4 font-medium text-right">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800">
@@ -287,17 +300,6 @@ export const Dashboard: React.FC = () => {
                                                 )}
 
                                                 <div className="w-px h-6 bg-slate-700 mx-2"></div>
-
-                                                {p.latest_crawl_id && (
-                                                    <button
-                                                        onClick={() => {
-                                                            navigate(`?crawl_id=${p.latest_crawl_id}`);
-                                                            alert(`Project ${p.domain} Selected. You can now use the sidebar tools.`);
-                                                        }}
-                                                        className="inline-flex items-center gap-1 text-slate-300 hover:text-white text-xs font-semibold uppercase tracking-wider bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded transition-colors">
-                                                        Select Project
-                                                    </button>
-                                                )}
 
                                                 {p.latest_crawl_id && (
                                                     <button

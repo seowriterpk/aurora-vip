@@ -37,7 +37,8 @@ class Fetcher
             curl_setopt_array($ch, [
                 CURLOPT_URL => $url,
                 CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_FOLLOWLOCATION => false, // We follow manually to track chains
+                CURLOPT_FOLLOWLOCATION => true, // Follow redirects to get final page body
+                CURLOPT_MAXREDIRS => 5,
                 CURLOPT_TIMEOUT => 20, // 20s timeout per request
                 CURLOPT_CONNECTTIMEOUT => 10,
                 CURLOPT_USERAGENT => $randomUa,
@@ -52,7 +53,9 @@ class Fetcher
                     "Referer: https://www.google.com/"
                 ],
                 CURLOPT_HEADER => true,
-                CURLOPT_ENCODING => '' // Handle gzip/deflate
+                CURLOPT_ENCODING => '', // Handle gzip/deflate
+                CURLOPT_SSL_VERIFYPEER => false, // Many shared hosting sites have bad certs
+                CURLOPT_SSL_VERIFYHOST => 0
             ]);
 
             $this->handles[$url] = $ch;
@@ -78,17 +81,15 @@ class Fetcher
             $headers = substr($response, 0, $headerSize);
             $body = substr($response, $headerSize);
 
-            // Handle explicit redirects manually for tracking
-            if ($info['http_code'] >= 300 && $info['http_code'] < 400) {
-                if (preg_match('/^Location:\s*(.*)$/mi', $headers, $matches)) {
-                    $location = trim($matches[1]);
-                    // Store redirect step
-                    $this->redirectChains[$url][] = [
-                        'status' => $info['http_code'],
-                        'url' => $location
-                    ];
-                    $info['redirect_target'] = $location;
-                }
+            // Track redirect chain from curl info
+            $redirectUrl = curl_getinfo($ch, CURLINFO_REDIRECT_URL);
+            $redirectCount = curl_getinfo($ch, CURLINFO_REDIRECT_COUNT);
+            if ($redirectCount > 0 || !empty($redirectUrl)) {
+                $this->redirectChains[$url][] = [
+                    'status' => $info['http_code'],
+                    'url' => $info['url'], // final URL after redirects
+                    'redirects' => $redirectCount
+                ];
             }
 
             $this->results[$url] = [
