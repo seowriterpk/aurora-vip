@@ -5,6 +5,35 @@ authenticate();
 try {
     $db = getDb();
 
+    // ============================================================
+    // AUTO-MIGRATOR (Silently patches Hostinger DB without commands)
+    // Checks if the new forensic columns exist, if not, adds them!
+    // ============================================================
+    try {
+        $checkStmt = $db->query("SHOW COLUMNS FROM pages LIKE 'canonical_status'");
+        if ($checkStmt->rowCount() === 0) {
+            $migrations = [
+                "ALTER TABLE pages ADD COLUMN redirect_chain_json TEXT AFTER size_bytes",
+                "ALTER TABLE pages ADD COLUMN h_structure_json TEXT AFTER h2_json",
+                "ALTER TABLE pages ADD COLUMN hreflang_json TEXT AFTER schema_types",
+                "ALTER TABLE pages ADD COLUMN canonical_status VARCHAR(50) DEFAULT NULL AFTER canonical",
+                "ALTER TABLE pages ADD COLUMN has_multiple_canonicals TINYINT(1) DEFAULT 0 AFTER canonical_status",
+                "ALTER TABLE pages ADD COLUMN soft_404 TINYINT(1) DEFAULT 0 AFTER hreflang_json",
+                "ALTER TABLE pages ADD COLUMN is_indexable TINYINT(1) DEFAULT 1 AFTER soft_404",
+                "ALTER TABLE pages ADD COLUMN indexability_score INT DEFAULT 100 AFTER is_indexable",
+                "ALTER TABLE pages ADD COLUMN form_actions_json TEXT AFTER images_oversized",
+            ];
+            foreach ($migrations as $sql) {
+                try {
+                    $db->exec($sql);
+                } catch (PDOException $e) {
+                }
+            }
+        }
+    } catch (Exception $e) {
+        // Ignore check failures safely
+    }
+
     // Fetch all projects with their latest crawl status
     $stmt = $db->query("
         SELECT p.id as project_id, p.domain, p.created_at, 
