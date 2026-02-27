@@ -221,7 +221,33 @@ try {
         }
     }
 
-    echo "Database initialized successfully. Schema version: FORENSIC-2.0\n";
+    // ============================================================
+    // SEAMLESS DATABASE MIGRATIONS
+    // Auto-patch existing tables without dropping them
+    // ============================================================
+    $migrations = [
+        "ALTER TABLE pages ADD COLUMN redirect_chain_json TEXT AFTER size_bytes",
+        "ALTER TABLE pages ADD COLUMN h_structure_json TEXT AFTER h2_json",
+        "ALTER TABLE pages ADD COLUMN hreflang_json TEXT AFTER schema_types",
+        "ALTER TABLE pages ADD COLUMN canonical_status VARCHAR(50) DEFAULT NULL AFTER canonical",
+        "ALTER TABLE pages ADD COLUMN has_multiple_canonicals TINYINT(1) DEFAULT 0 AFTER canonical_status",
+        "ALTER TABLE pages ADD COLUMN soft_404 TINYINT(1) DEFAULT 0 AFTER hreflang_json",
+        "ALTER TABLE pages ADD COLUMN is_indexable TINYINT(1) DEFAULT 1 AFTER soft_404",
+        "ALTER TABLE pages ADD COLUMN indexability_score INT DEFAULT 100 AFTER is_indexable",
+        "ALTER TABLE pages ADD COLUMN form_actions_json TEXT AFTER images_oversized",
+        "ALTER TABLE pages ADD COLUMN x_robots_tag VARCHAR(255) DEFAULT NULL AFTER meta_robots",
+    ];
+
+    foreach ($migrations as $sql) {
+        try {
+            $db->exec($sql);
+            echo "Migration applied: " . explode(' ', $sql)[4] . "\n";
+        } catch (PDOException $e) {
+            // Column likely exists
+        }
+    }
+
+    echo "Database initialized successfully. Schema version: FORENSIC-2.1\n";
 
 } catch (PDOException $e) {
     echo "Initialization failed: " . $e->getMessage() . "\n";

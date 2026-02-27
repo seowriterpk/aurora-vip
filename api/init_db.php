@@ -235,6 +235,7 @@ try {
         "ALTER TABLE pages ADD COLUMN is_indexable TINYINT(1) DEFAULT 1 AFTER soft_404",
         "ALTER TABLE pages ADD COLUMN indexability_score INT DEFAULT 100 AFTER is_indexable",
         "ALTER TABLE pages ADD COLUMN form_actions_json TEXT AFTER images_oversized",
+        "ALTER TABLE pages ADD COLUMN x_robots_tag VARCHAR(255) DEFAULT NULL AFTER meta_robots",
     ];
 
     foreach ($migrations as $sql) {

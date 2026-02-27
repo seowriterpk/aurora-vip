@@ -10,7 +10,7 @@ try {
     // Checks if the new forensic columns exist, if not, adds them!
     // ============================================================
     try {
-        $checkStmt = $db->query("SHOW COLUMNS FROM pages LIKE 'canonical_status'");
+        $checkStmt = $db->query("SHOW COLUMNS FROM pages LIKE 'x_robots_tag'");
         if ($checkStmt->rowCount() === 0) {
             $migrations = [
                 "ALTER TABLE pages ADD COLUMN redirect_chain_json TEXT AFTER size_bytes",
@@ -22,6 +22,7 @@ try {
                 "ALTER TABLE pages ADD COLUMN is_indexable TINYINT(1) DEFAULT 1 AFTER soft_404",
                 "ALTER TABLE pages ADD COLUMN indexability_score INT DEFAULT 100 AFTER is_indexable",
                 "ALTER TABLE pages ADD COLUMN form_actions_json TEXT AFTER images_oversized",
+                "ALTER TABLE pages ADD COLUMN x_robots_tag VARCHAR(255) DEFAULT NULL AFTER meta_robots",
             ];
             foreach ($migrations as $sql) {
                 try {
