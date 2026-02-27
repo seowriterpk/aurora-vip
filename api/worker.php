@@ -63,10 +63,11 @@ try {
     }
 
     // ============================================================
-    // 2. RECOVER STUCK URLs (Only URLs stuck in PROCESSING for > 3 minutes)
-    // This prevents the race condition where two workers reset each other's active batch
+    // 2. RECOVER STUCK URLs
+    // The file lock (above) guarantees only ONE worker runs at a time,
+    // so any PROCESSING URLs here are from a previously crashed worker.
     // ============================================================
-    $db->prepare("UPDATE crawl_queue SET status = 'PENDING' WHERE crawl_id = ? AND status = 'PROCESSING' AND updated_at < NOW() - INTERVAL 3 MINUTE")->execute([$crawlId]);
+    $db->prepare("UPDATE crawl_queue SET status = 'PENDING' WHERE crawl_id = ? AND status = 'PROCESSING'")->execute([$crawlId]);
 
     // ============================================================
     // 3. GRAB A BATCH OF PENDING URLs
@@ -368,9 +369,9 @@ try {
         } catch (\Exception $logErr) {
         }
 
-        // Reset STUCK URLs (only those stuck > 3 min, not currently active ones)
+        // Reset PROCESSING items back to PENDING (safe because file lock ensures only one worker)
         try {
-            $db->prepare("UPDATE crawl_queue SET status = 'PENDING' WHERE crawl_id = ? AND status = 'PROCESSING' AND updated_at < NOW() - INTERVAL 3 MINUTE")->execute([$crawlId]);
+            $db->prepare("UPDATE crawl_queue SET status = 'PENDING' WHERE crawl_id = ? AND status = 'PROCESSING'")->execute([$crawlId]);
         } catch (\Exception $resetErr) {
         }
     }
