@@ -3,6 +3,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/engine/fetcher.php';
 require_once __DIR__ . '/engine/parser.php';
 require_once __DIR__ . '/engine/robots.php';
+require_once __DIR__ . '/engine/issue_detector.php';
 
 authenticate();
 
@@ -87,12 +88,18 @@ try {
             $db->prepare("UPDATE crawls SET status = 'COMPLETED', ended_at = CURRENT_TIMESTAMP WHERE id = ?")->execute([$crawlId]);
             $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'SUCCESS', 'Crawl finished successfully.')")->execute([$crawlId]);
 
-            // ---- RISK 2 FIX: Trim old logs to prevent unbounded growth ----
-            // Keep the most recent 500 logs per crawl, delete the rest
+            // ---- POST-CRAWL ANALYSIS: Detect cross-page issues ----
+            try {
+                IssueDetector::runPostCrawlAnalysis($db, $crawlId);
+                $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'INFO', 'Post-crawl analysis complete: duplicate titles, metas, canonical conflicts checked.')")->execute([$crawlId]);
+            } catch (\Exception $postErr) {
+                // Post-crawl failure should never crash
+            }
+
+            // Trim old logs
             try {
                 $db->prepare("DELETE FROM crawl_logs WHERE crawl_id = ? AND id NOT IN (SELECT id FROM (SELECT id FROM crawl_logs WHERE crawl_id = ? ORDER BY id DESC LIMIT 500) AS keep)")->execute([$crawlId, $crawlId]);
             } catch (\Exception $cleanupErr) {
-                // Non-critical — log cleanup failure should never crash the worker
             }
 
             echo json_encode(['message' => 'Crawl Completed', 'remaining' => 0]);
@@ -154,15 +161,22 @@ try {
     // ============================================================
     $db->beginTransaction();
 
+    // Expanded INSERT with all forensic columns
     $insertPageStmt = $db->prepare("INSERT IGNORE INTO pages 
-        (crawl_id, url, status_code, load_time_ms, size_bytes, word_count, text_ratio_percent, content_hash, title, meta_desc, h1, h2_json, canonical, meta_robots, schema_types, is_indexable, depth, redirect_chain_json) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        (crawl_id, url, status_code, load_time_ms, size_bytes, word_count, text_ratio_percent, content_hash,
+         title, meta_desc, h1, h2_json, h_structure_json, canonical, canonical_status, has_multiple_canonicals,
+         meta_robots, x_robots_tag, schema_types, hreflang_json, soft_404,
+         is_indexable, indexability_score, images_count, images_missing_alt, images_oversized,
+         form_actions_json, depth, redirect_chain_json) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
-    // RISK 1 FIX: INSERT IGNORE prevents duplicate link rows from retries/navigation duplication
-    $insertLinkStmt = $db->prepare("INSERT IGNORE INTO links (crawl_id, source_url, target_url, anchor_text, html_snippet, is_external) VALUES (?, ?, ?, ?, ?, ?)");
+    $insertLinkStmt = $db->prepare("INSERT IGNORE INTO links (crawl_id, source_url, target_url, anchor_text, html_snippet, is_external, discovery_source) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    $insertImageStmt = $db->prepare("INSERT INTO images (crawl_id, page_id, src, alt, width, height, has_lazy_loading, format) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     $insertQueueStmt = $db->prepare("INSERT IGNORE INTO crawl_queue (crawl_id, url, depth, status) VALUES (?, ?, ?, 'PENDING')");
     $updateQueueSuccessStmt = $db->prepare("UPDATE crawl_queue SET status = 'CRAWLED' WHERE id = ?");
     $updateQueueErrorStmt = $db->prepare("UPDATE crawl_queue SET status = 'ERROR', error_msg = ? WHERE id = ?");
+
+    $issueDetector = new IssueDetector($db, $crawlId);
 
     $processedCount = 0;
     $errorCount = 0;
@@ -231,18 +245,36 @@ try {
             'meta_desc' => null,
             'h1' => null,
             'h2_json' => '[]',
+            'h_structure_json' => '[]',
             'canonical' => null,
+            'canonical_status' => null,
+            'has_multiple_canonicals' => 0,
             'meta_robots' => null,
             'schema_types' => null,
+            'hreflang_json' => '[]',
+            'soft_404' => 0,
             'is_indexable' => 1,
+            'indexability_score' => 100,
+            'images' => [],
+            'images_count' => 0,
+            'images_missing_alt' => 0,
+            'images_oversized' => 0,
+            'form_actions_json' => '[]',
+            'form_urls' => [],
+            'hreflang_urls' => [],
             'internal_links' => [],
             'external_links' => []
         ];
 
         // Check X-Robots-Tag HTTP Header
-        if (!empty($result['headers']) && strpos(strtolower($result['headers']), 'x-robots-tag: noindex') !== false) {
-            $parseData['is_indexable'] = 0;
-            $parseData['meta_robots'] = 'noindex (HTTP header)';
+        $xRobotsTag = null;
+        if (!empty($result['headers'])) {
+            if (preg_match('/x-robots-tag:\s*(.+)/i', $result['headers'], $xMatch)) {
+                $xRobotsTag = trim($xMatch[1]);
+            }
+            if ($xRobotsTag && strpos(strtolower($xRobotsTag), 'noindex') !== false) {
+                $parseData['is_indexable'] = 0;
+            }
         }
 
         // Parse HTML body if content is HTML
@@ -253,7 +285,6 @@ try {
                 if ($tmp)
                     $parseData = $tmp;
             } catch (\Exception $parseErr) {
-                // Parser crash should never kill the worker — log and continue
                 try {
                     $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'ERROR', ?)")->execute([$crawlId, "Parser Error on $url: " . substr($parseErr->getMessage(), 0, 200)]);
                 } catch (\Exception $logErr) {
@@ -261,8 +292,9 @@ try {
             }
         }
 
-        // ---- Insert Page ----
+        // ---- Insert Page (with all forensic columns) ----
         $normalizedUrl = Parser::normalizeUrl($url);
+        $pageId = null;
 
         try {
             $insertPageStmt->execute([
@@ -278,18 +310,56 @@ try {
                 $parseData['meta_desc'],
                 $parseData['h1'],
                 $parseData['h2_json'],
+                $parseData['h_structure_json'] ?? '[]',
                 $parseData['canonical'],
+                $parseData['canonical_status'],
+                $parseData['has_multiple_canonicals'] ?? 0,
                 $parseData['meta_robots'],
+                $xRobotsTag,
                 $parseData['schema_types'] ?? null,
+                $parseData['hreflang_json'] ?? '[]',
+                $parseData['soft_404'] ?? 0,
                 $parseData['is_indexable'],
+                $parseData['indexability_score'] ?? 100,
+                $parseData['images_count'] ?? 0,
+                $parseData['images_missing_alt'] ?? 0,
+                $parseData['images_oversized'] ?? 0,
+                $parseData['form_actions_json'] ?? '[]',
                 $qItem['depth'],
                 json_encode($chain)
             ]);
+            $pageId = $db->lastInsertId();
         } catch (\Exception $insertErr) {
-            // Duplicate or schema error — log but don't crash
             try {
                 $db->prepare("INSERT INTO crawl_logs (crawl_id, type, message) VALUES (?, 'ERROR', ?)")->execute([$crawlId, "Insert Error for $url: " . substr($insertErr->getMessage(), 0, 200)]);
             } catch (\Exception $logErr) {
+            }
+        }
+
+        // ---- Insert Images ----
+        if ($pageId && !empty($parseData['images'])) {
+            foreach ($parseData['images'] as $img) {
+                try {
+                    $insertImageStmt->execute([
+                        $crawlId,
+                        $pageId,
+                        $img['src'],
+                        $img['alt'],
+                        $img['width'],
+                        $img['height'],
+                        $img['has_lazy_loading'],
+                        $img['format']
+                    ]);
+                } catch (\Exception $imgErr) {
+                }
+            }
+        }
+
+        // ---- Run Issue Detector ----
+        if ($pageId) {
+            try {
+                $issueDetector->analyze($pageId, $normalizedUrl, $parseData, $statusCode, $xRobotsTag);
+            } catch (\Exception $issueErr) {
             }
         }
 
@@ -297,21 +367,41 @@ try {
         foreach ($parseData['internal_links'] as $link) {
             try {
                 $normalizedInternal = Parser::normalizeUrl($link['url']);
-                $insertLinkStmt->execute([$crawlId, $normalizedUrl, $normalizedInternal, $link['anchor'] ?? '', $link['snippet'] ?? '', 0]);
+                $insertLinkStmt->execute([$crawlId, $normalizedUrl, $normalizedInternal, $link['anchor'] ?? '', $link['snippet'] ?? '', 0, 'internal_link']);
 
-                // Only queue if within depth limit
                 if ($qItem['depth'] < $maxDepth) {
                     $insertQueueStmt->execute([$crawlId, $normalizedInternal, $qItem['depth'] + 1]);
                 }
             } catch (\Exception $linkErr) {
-                // Link insert error should never crash worker
             }
         }
 
         foreach ($parseData['external_links'] as $link) {
             try {
-                $insertLinkStmt->execute([$crawlId, $normalizedUrl, $link['url'] ?? '', $link['anchor'] ?? '', $link['snippet'] ?? '', 1]);
+                $insertLinkStmt->execute([$crawlId, $normalizedUrl, $link['url'] ?? '', $link['anchor'] ?? '', $link['snippet'] ?? '', 1, 'internal_link']);
             } catch (\Exception $linkErr) {
+            }
+        }
+
+        // ---- Queue hreflang-discovered URLs ----
+        foreach ($parseData['hreflang_urls'] ?? [] as $hreflangUrl) {
+            try {
+                $insertQueueStmt->execute([$crawlId, $hreflangUrl, $qItem['depth'] + 1]);
+                $insertLinkStmt->execute([$crawlId, $normalizedUrl, $hreflangUrl, '', '', 0, 'hreflang']);
+            } catch (\Exception $hErr) {
+            }
+        }
+
+        // ---- Queue form-action-discovered URLs ----
+        foreach ($parseData['form_urls'] ?? [] as $formUrl) {
+            try {
+                $baseHost = parse_url($url, PHP_URL_HOST);
+                $formHost = parse_url($formUrl, PHP_URL_HOST);
+                if ($formHost === $baseHost && $qItem['depth'] < $maxDepth) {
+                    $insertQueueStmt->execute([$crawlId, $formUrl, $qItem['depth'] + 1]);
+                    $insertLinkStmt->execute([$crawlId, $normalizedUrl, $formUrl, '', '', 0, 'form_action']);
+                }
+            } catch (\Exception $fErr) {
             }
         }
 

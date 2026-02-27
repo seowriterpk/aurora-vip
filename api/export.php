@@ -1,10 +1,9 @@
 <?php
 require_once __DIR__ . '/config.php';
-// Authenticate via session cookie (browser sends it automatically on <a> download clicks)
 authenticate();
 
 $crawlId = $_GET['crawl_id'] ?? 0;
-$type = $_GET['type'] ?? 'pages'; // pages, links, issues
+$type = $_GET['type'] ?? 'pages'; // pages, links, issues, images
 
 if (!$crawlId) {
     die('Missing crawl_id');
@@ -17,7 +16,6 @@ try {
     $stmt = $db->prepare("SELECT p.domain FROM crawls c JOIN projects p ON c.project_id = p.id WHERE c.id = ?");
     $stmt->execute([$crawlId]);
     $domain = $stmt->fetchColumn();
-
     if (!$domain) {
         die('Invalid crawl_id');
     }
@@ -31,20 +29,36 @@ try {
     $output = fopen('php://output', 'w');
 
     if ($type === 'pages') {
-        fputcsv($output, ['URL', 'Status Code', 'Load Time (ms)', 'Size (Bytes)', 'Word Count', 'Text Ratio (%)', 'Title', 'H1', 'Meta Description', 'Canonical', 'Indexable', 'Depth']);
-        $stmt = $db->prepare("SELECT url, status_code, load_time_ms, size_bytes, word_count, text_ratio_percent, title, h1, meta_desc, canonical, is_indexable, depth FROM pages WHERE crawl_id = ?");
+        fputcsv($output, ['URL', 'Status', 'Load (ms)', 'Size', 'Words', 'Text%', 'Title', 'H1', 'Meta Desc', 'Canonical', 'Canonical Status', 'Indexable', 'Score', 'Soft 404', 'Images', 'ImgNoAlt', 'Depth']);
+        $stmt = $db->prepare("SELECT url, status_code, load_time_ms, size_bytes, word_count, text_ratio_percent, title, h1, meta_desc, canonical, canonical_status, is_indexable, indexability_score, soft_404, images_count, images_missing_alt, depth FROM pages WHERE crawl_id = ?");
         $stmt->execute([$crawlId]);
-
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
             fputcsv($output, $row);
         }
-    } elseif ($type === 'links') {
-        fputcsv($output, ['Source URL', 'Target URL', 'Anchor Text', 'Internal/External']);
-        $stmt = $db->prepare("SELECT source_url, target_url, anchor_text, is_external FROM links WHERE crawl_id = ?");
-        $stmt->execute([$crawlId]);
 
+    } elseif ($type === 'links') {
+        fputcsv($output, ['Source URL', 'Target URL', 'Anchor Text', 'Type', 'Discovery Source']);
+        $stmt = $db->prepare("SELECT source_url, target_url, anchor_text, is_external, discovery_source FROM links WHERE crawl_id = ?");
+        $stmt->execute([$crawlId]);
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $row['is_external'] = $row['is_external'] ? 'External' : 'Internal';
+            fputcsv($output, $row);
+        }
+
+    } elseif ($type === 'issues') {
+        fputcsv($output, ['URL', 'Type', 'Severity', 'Message', 'Description', 'Recommendation']);
+        $stmt = $db->prepare("SELECT url, type, severity, message, description, recommendation FROM issues WHERE crawl_id = ? ORDER BY FIELD(severity, 'Critical', 'High', 'Medium', 'Low')");
+        $stmt->execute([$crawlId]);
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            fputcsv($output, $row);
+        }
+
+    } elseif ($type === 'images') {
+        fputcsv($output, ['Page URL', 'Image Src', 'Alt Text', 'Width', 'Height', 'Lazy Loading', 'Format']);
+        $stmt = $db->prepare("SELECT p.url as page_url, i.src, i.alt, i.width, i.height, i.has_lazy_loading, i.format FROM images i JOIN pages p ON i.page_id = p.id AND i.crawl_id = p.crawl_id WHERE i.crawl_id = ?");
+        $stmt->execute([$crawlId]);
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $row['has_lazy_loading'] = $row['has_lazy_loading'] ? 'Yes' : 'No';
             fputcsv($output, $row);
         }
     }

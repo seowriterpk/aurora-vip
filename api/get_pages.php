@@ -32,7 +32,7 @@ try {
     $totalCount = $countStmt->fetchColumn();
 
     // Get Paginated Data
-    $dataStmt = $db->prepare("SELECT id, url, status_code, load_time_ms, size_bytes, word_count, text_ratio_percent, title, meta_desc, h1, canonical, meta_robots, schema_types, is_indexable, depth, crawled_at " . $query . " ORDER BY depth ASC, id ASC LIMIT :limit OFFSET :offset");
+    $dataStmt = $db->prepare("SELECT id, url, status_code, load_time_ms, size_bytes, word_count, text_ratio_percent, title, meta_desc, h1, canonical, canonical_status, has_multiple_canonicals, meta_robots, x_robots_tag, schema_types, is_indexable, indexability_score, soft_404, images_count, images_missing_alt, depth, crawled_at " . $query . " ORDER BY depth ASC, id ASC LIMIT :limit OFFSET :offset");
 
     foreach ($params as $key => $value) {
         $dataStmt->bindValue($key, $value);
