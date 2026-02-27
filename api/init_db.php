@@ -4,6 +4,23 @@ require_once __DIR__ . '/config.php';
 try {
     $db = getDb();
 
+    // ============================================================
+    // CLEAN RESET: Visit init_db.php?reset=1 to DROP all tables and recreate
+    // Use this when upgrading from an older schema version
+    // ============================================================
+    if (isset($_GET['reset']) && $_GET['reset'] === '1') {
+        $db->exec("SET FOREIGN_KEY_CHECKS = 0");
+        $db->exec("DROP TABLE IF EXISTS crawl_logs");
+        $db->exec("DROP TABLE IF EXISTS issues");
+        $db->exec("DROP TABLE IF EXISTS links");
+        $db->exec("DROP TABLE IF EXISTS crawl_queue");
+        $db->exec("DROP TABLE IF EXISTS pages");
+        $db->exec("DROP TABLE IF EXISTS crawls");
+        $db->exec("DROP TABLE IF EXISTS projects");
+        $db->exec("SET FOREIGN_KEY_CHECKS = 1");
+        echo "All tables dropped. Recreating...\n";
+    }
+
     // Create Projects Table
     $db->exec("CREATE TABLE IF NOT EXISTS projects (
         id INT AUTO_INCREMENT PRIMARY KEY,
