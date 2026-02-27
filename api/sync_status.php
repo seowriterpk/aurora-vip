@@ -18,6 +18,20 @@ try {
 
     $projects = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+    // Fetch issue summaries for these projects
+    foreach ($projects as &$p) {
+        if ($p['latest_crawl_id']) {
+            $istmt = $db->prepare("SELECT severity, COUNT(*) as count FROM issues WHERE crawl_id = ? GROUP BY severity");
+            $istmt->execute([$p['latest_crawl_id']]);
+            $issues = ['Critical' => 0, 'High' => 0, 'Medium' => 0, 'Low' => 0];
+            foreach ($istmt->fetchAll(PDO::FETCH_ASSOC) as $irow) {
+                $issues[$irow['severity']] = (int) $irow['count'];
+            }
+            $p['issues'] = $issues;
+        } else {
+            $p['issues'] = null;
+        }
+    }
     // Provide detailed status if a specific crawl is requested
     $detail = [];
     if (isset($_GET['crawl_id'])) {

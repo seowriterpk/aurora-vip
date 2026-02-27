@@ -61,6 +61,26 @@ try {
             $row['has_lazy_loading'] = $row['has_lazy_loading'] ? 'Yes' : 'No';
             fputcsv($output, $row);
         }
+    } elseif ($type === 'canonical') {
+        fputcsv($output, ['Page URL', 'Canonical Target', 'Status Code']);
+        $stmt = $db->prepare("SELECT url, canonical, status_code FROM pages WHERE crawl_id = ? AND canonical IS NOT NULL AND canonical != '' AND ((canonical NOT LIKE CONCAT(url, '%') AND canonical NOT LIKE CONCAT(REPLACE(url, 'http://', 'https://'), '%')) OR status_code >= 300) ORDER BY status_code DESC");
+        $stmt->execute([$crawlId]);
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            fputcsv($output, $row);
+        }
+
+    } elseif ($type === 'redirect_links') {
+        fputcsv($output, ['Source Page', 'Bad Link (Redirects)', 'Redirects To', 'Status Code']);
+        $stmt = $db->prepare("
+            SELECT l.source_url, l.target_url as bad_link, p.redirects_to, p.status_code 
+            FROM links l 
+            JOIN pages p ON l.target_url = p.url AND l.crawl_id = p.crawl_id 
+            WHERE l.crawl_id = ? AND p.status_code >= 300 AND p.status_code < 400
+        ");
+        $stmt->execute([$crawlId]);
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            fputcsv($output, $row);
+        }
     }
 
     fclose($output);

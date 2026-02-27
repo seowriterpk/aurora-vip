@@ -49,10 +49,8 @@ class Parser
         $port = isset($parsed['port']) ? ':' . $parsed['port'] : '';
         $path = $parsed['path'] ?? '/';
 
-        if ($path === '' || $path === '/') {
+        if ($path === '') {
             $path = '/';
-        } else {
-            $path = rtrim($path, '/');
         }
 
         $query = '';

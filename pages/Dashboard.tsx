@@ -262,25 +262,41 @@ export const Dashboard: React.FC = () => {
                         <table className="w-full text-left text-sm">
                             <thead className="bg-slate-950 text-slate-400">
                                 <tr>
-                                    <th className="px-6 py-4 font-medium">Website</th>
-                                    <th className="px-6 py-4 font-medium">Status</th>
-                                    <th className="px-6 py-4 font-medium text-center">Pages Found</th>
-                                    <th className="px-6 py-4 font-medium text-right">Actions</th>
+                                    <th className="px-4 py-4 font-medium">Website</th>
+                                    <th className="px-4 py-4 font-medium">Status</th>
+                                    <th className="px-4 py-4 font-medium text-center">Pages Found</th>
+                                    <th className="px-4 py-4 font-medium">Issues Detected</th>
+                                    <th className="px-4 py-4 font-medium text-right">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800">
                                 {projects.map(p => (
                                     <tr key={p.latest_crawl_id || p.project_id} className="hover:bg-slate-800/50 transition-colors">
-                                        <td className="px-6 py-4 font-medium text-slate-200">{p.domain}</td>
-                                        <td className="px-6 py-4 text-slate-400">
+                                        <td className="px-4 py-4 font-medium text-slate-200">{p.domain}</td>
+                                        <td className="px-4 py-4 text-slate-400">
                                             <div className="flex items-center gap-2 font-mono text-xs">
                                                 <span className={`w-2 h-2 rounded-full ${p.status === 'RUNNING' ? 'bg-indigo-500 animate-pulse' : p.status === 'COMPLETED' ? 'bg-green-500' : p.status === 'PAUSED' ? 'bg-amber-500' : 'bg-red-500'}`}></span>
                                                 {p.status || 'NO DATA'}
                                             </div>
                                         </td>
-                                        <td className="px-6 py-4 text-center font-mono text-slate-300">{p.urls_crawled || 0}</td>
+                                        <td className="px-4 py-4 text-center font-mono text-slate-300">{p.urls_crawled || 0}</td>
+                                        <td className="px-4 py-4">
+                                            {p.issues ? (
+                                                <div className="flex items-center gap-1">
+                                                    {p.issues.Critical > 0 && <span className="bg-red-500/10 text-red-500 border border-red-500/20 px-1.5 py-0.5 rounded text-[10px] font-bold" title="Critical">{p.issues.Critical}</span>}
+                                                    {p.issues.High > 0 && <span className="bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1.5 py-0.5 rounded text-[10px] font-bold" title="High">{p.issues.High}</span>}
+                                                    {p.issues.Medium > 0 && <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded text-[10px] font-bold" title="Medium">{p.issues.Medium}</span>}
+                                                    {p.issues.Low > 0 && <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded text-[10px] font-bold" title="Low">{p.issues.Low}</span>}
+                                                    {p.issues.Critical === 0 && p.issues.High === 0 && p.issues.Medium === 0 && p.issues.Low === 0 && (
+                                                        <span className="text-green-500 text-xs font-semibold">Clean</span>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <span className="text-slate-600 text-[10px]">-</span>
+                                            )}
+                                        </td>
 
-                                        <td className="px-6 py-4">
+                                        <td className="px-4 py-4">
                                             <div className="flex justify-end items-center gap-2">
                                                 {/* Start/Pause controls for active runs */}
                                                 {p.status === 'RUNNING' && (
