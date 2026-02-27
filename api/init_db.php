@@ -236,6 +236,15 @@ try {
         "ALTER TABLE pages ADD COLUMN indexability_score INT DEFAULT 100 AFTER is_indexable",
         "ALTER TABLE pages ADD COLUMN form_actions_json TEXT AFTER images_oversized",
         "ALTER TABLE pages ADD COLUMN x_robots_tag VARCHAR(255) DEFAULT NULL AFTER meta_robots",
+
+        "ALTER TABLE links ADD COLUMN html_snippet TEXT AFTER anchor_text",
+        "ALTER TABLE links ADD COLUMN discovery_source VARCHAR(50) DEFAULT 'internal_link' AFTER is_external",
+
+        "ALTER TABLE images ADD COLUMN has_lazy_loading TINYINT(1) DEFAULT 0 AFTER height",
+        "ALTER TABLE images ADD COLUMN format VARCHAR(20) DEFAULT NULL AFTER has_lazy_loading",
+
+        "ALTER TABLE issues ADD COLUMN html_location TEXT AFTER recommendation",
+        "ALTER TABLE issues ADD COLUMN offending_link TEXT AFTER html_location"
     ];
 
     foreach ($migrations as $sql) {

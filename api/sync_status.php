@@ -7,12 +7,15 @@ try {
 
     // ============================================================
     // AUTO-MIGRATOR (Silently patches Hostinger DB without commands)
-    // Checks if the new forensic columns exist, if not, adds them!
+    // Ensures ALL TABLES have their latest forensic columns
     // ============================================================
     try {
-        $checkStmt = $db->query("SHOW COLUMNS FROM pages LIKE 'x_robots_tag'");
-        if ($checkStmt->rowCount() === 0) {
-            $migrations = [
+        $migrations = [];
+
+        $pagesCheck = $db->query("SHOW COLUMNS FROM pages LIKE 'x_robots_tag'");
+        if ($pagesCheck->rowCount() === 0) {
+            array_push(
+                $migrations,
                 "ALTER TABLE pages ADD COLUMN redirect_chain_json TEXT AFTER size_bytes",
                 "ALTER TABLE pages ADD COLUMN h_structure_json TEXT AFTER h2_json",
                 "ALTER TABLE pages ADD COLUMN hreflang_json TEXT AFTER schema_types",
@@ -22,13 +25,41 @@ try {
                 "ALTER TABLE pages ADD COLUMN is_indexable TINYINT(1) DEFAULT 1 AFTER soft_404",
                 "ALTER TABLE pages ADD COLUMN indexability_score INT DEFAULT 100 AFTER is_indexable",
                 "ALTER TABLE pages ADD COLUMN form_actions_json TEXT AFTER images_oversized",
-                "ALTER TABLE pages ADD COLUMN x_robots_tag VARCHAR(255) DEFAULT NULL AFTER meta_robots",
-            ];
-            foreach ($migrations as $sql) {
-                try {
-                    $db->exec($sql);
-                } catch (PDOException $e) {
-                }
+                "ALTER TABLE pages ADD COLUMN x_robots_tag VARCHAR(255) DEFAULT NULL AFTER meta_robots"
+            );
+        }
+
+        $linksCheck = $db->query("SHOW COLUMNS FROM links LIKE 'discovery_source'");
+        if ($linksCheck->rowCount() === 0) {
+            array_push(
+                $migrations,
+                "ALTER TABLE links ADD COLUMN html_snippet TEXT AFTER anchor_text",
+                "ALTER TABLE links ADD COLUMN discovery_source VARCHAR(50) DEFAULT 'internal_link' AFTER is_external"
+            );
+        }
+
+        $imagesCheck = $db->query("SHOW COLUMNS FROM images LIKE 'format'");
+        if ($imagesCheck->rowCount() === 0) {
+            array_push(
+                $migrations,
+                "ALTER TABLE images ADD COLUMN has_lazy_loading TINYINT(1) DEFAULT 0 AFTER height",
+                "ALTER TABLE images ADD COLUMN format VARCHAR(20) DEFAULT NULL AFTER has_lazy_loading"
+            );
+        }
+
+        $issuesCheck = $db->query("SHOW COLUMNS FROM issues LIKE 'html_location'");
+        if ($issuesCheck->rowCount() === 0) {
+            array_push(
+                $migrations,
+                "ALTER TABLE issues ADD COLUMN html_location TEXT AFTER recommendation",
+                "ALTER TABLE issues ADD COLUMN offending_link TEXT AFTER html_location"
+            );
+        }
+
+        foreach ($migrations as $sql) {
+            try {
+                $db->exec($sql);
+            } catch (PDOException $e) {
             }
         }
     } catch (Exception $e) {
