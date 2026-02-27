@@ -108,6 +108,35 @@ try {
         FOREIGN KEY(crawl_id) REFERENCES crawls(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
+    // ============================================================
+    // MIGRATIONS — Safely add new columns/keys to existing tables
+    // CREATE TABLE IF NOT EXISTS won't modify existing tables,
+    // so these ALTER statements handle upgrades from older schemas.
+    // ============================================================
+    $migrations = [
+        // Add updated_at column to crawl_queue (for stuck-URL time-check recovery)
+        "ALTER TABLE crawl_queue ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+        // Add url_hash generated column to crawl_queue (for true dedup beyond 255-char prefix)
+        "ALTER TABLE crawl_queue ADD COLUMN url_hash CHAR(64) AS (SHA2(url, 256)) STORED",
+        // Add url_hash generated column to pages
+        "ALTER TABLE pages ADD COLUMN url_hash CHAR(64) AS (SHA2(url, 256)) STORED",
+        // Add UNIQUE KEY on links table (prevents duplicate link rows)
+        "ALTER TABLE links ADD UNIQUE KEY unique_link (crawl_id, source_url(191), target_url(191))",
+        // Drop old prefix-based unique keys and add hash-based ones
+        "ALTER TABLE crawl_queue DROP INDEX unique_crawl_url",
+        "ALTER TABLE crawl_queue ADD UNIQUE KEY unique_crawl_url_hash (crawl_id, url_hash)",
+        "ALTER TABLE pages DROP INDEX unique_crawl_page_url",
+        "ALTER TABLE pages ADD UNIQUE KEY unique_crawl_page_hash (crawl_id, url_hash)",
+    ];
+
+    foreach ($migrations as $sql) {
+        try {
+            $db->exec($sql);
+        } catch (PDOException $e) {
+            // Ignore — column/key already exists or old key doesn't exist
+        }
+    }
+
     // Indexes for absolute performance (ignore duplicate key errors if they already exist)
     $indexes = [
         "CREATE INDEX idx_crawl_queue_status ON crawl_queue(crawl_id, status)",
