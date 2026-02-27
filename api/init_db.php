@@ -221,6 +221,22 @@ try {
         }
     }
 
+    // ============================================================
+    // SEAMLESS DATABASE MIGRATIONS
+    // Auto-patch existing tables without dropping them
+    // ============================================================
+    try {
+        $db->exec("ALTER TABLE pages ADD COLUMN h_structure_json TEXT AFTER h2_json");
+        echo "Migration: Added h_structure_json to pages.\n";
+    } catch (PDOException $e) { /* Column likely exists */
+    }
+
+    try {
+        $db->exec("ALTER TABLE pages ADD COLUMN form_actions_json TEXT AFTER images_oversized");
+        echo "Migration: Added form_actions_json to pages.\n";
+    } catch (PDOException $e) { /* Column likely exists */
+    }
+
     echo "Database initialized successfully. Schema version: FORENSIC-2.0\n";
 
 } catch (PDOException $e) {
