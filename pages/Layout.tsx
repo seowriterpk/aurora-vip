@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, Link, useLocation, useSearchParams } from 'react-router-dom';
-import { Layers, Activity, Search, LayoutDashboard, DatabaseZap, LogOut } from 'lucide-react';
+import { Layers, Activity, Search, LayoutDashboard, DatabaseZap, LogOut, Crosshair } from 'lucide-react';
 
 export const Layout: React.FC = () => {
     const location = useLocation();
@@ -11,6 +11,7 @@ export const Layout: React.FC = () => {
         { path: '/', label: 'Projects Dashboard', icon: <DatabaseZap className="w-4 h-4" /> },
         { path: '/crawler', label: 'Technical Crawler', icon: <Search className="w-4 h-4" /> },
         { path: '/gsc', label: 'Search Console Insights', icon: <LayoutDashboard className="w-4 h-4" /> },
+        { path: '/aura-audit', label: 'AURA Link Audit', icon: <Crosshair className="w-4 h-4 text-emerald-400" /> },
         { path: '/seoptimer', label: 'On-Page SEOptimer', icon: <Activity className="w-4 h-4" /> },
         { path: '/sitebulb', label: 'Sitebulb Insights', icon: <Layers className="w-4 h-4" /> },
     ];

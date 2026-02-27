@@ -6,6 +6,7 @@ import { Crawler } from './pages/Crawler';
 import { GSC } from './pages/GSC';
 import { SEOptimer } from './pages/SEOptimer';
 import { Sitebulb } from './pages/Sitebulb';
+import { AuraAudit } from './pages/AuraAudit';
 import { Login } from './pages/Login';
 
 // ============================================================
@@ -167,6 +168,7 @@ const App: React.FC = () => {
                         <Route index element={<Dashboard />} />
                         <Route path="crawler" element={<Crawler />} />
                         <Route path="gsc" element={<GSC />} />
+                        <Route path="aura-audit" element={<AuraAudit />} />
                         <Route path="seoptimer" element={<SEOptimer />} />
                         <Route path="sitebulb" element={<Sitebulb />} />
                     </Route>
